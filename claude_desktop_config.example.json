@@ -1,0 +1,24 @@
+{
+  "mcpServers": {
+    "bitbucket": {
+      "command": "podman",
+      "args": [
+        "exec",
+        "-i",
+        "bitbucket-mcp",
+        "python",
+        "-m",
+        "src.main",
+        "--transport",
+        "stdio",
+        "--loggers",
+        "stderr"
+      ],
+      "env": {
+        "BITBUCKET_USERNAME": "your-email@example.com",
+        "BITBUCKET_TOKEN": "your-192-char-app-password",
+        "BITBUCKET_WORKSPACE": "your-workspace-name"
+      }
+    }
+  }
+}
