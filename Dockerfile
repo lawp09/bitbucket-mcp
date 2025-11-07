@@ -21,6 +21,9 @@ RUN uv pip install --system -r requirements.txt
 # Copy source code
 COPY src/ ./src/
 
+# Copy configuration files
+COPY configs/ ./configs/
+
 # Create non-root user for security
 RUN useradd -m -u 1000 mcpuser && \
     chown -R mcpuser:mcpuser /app

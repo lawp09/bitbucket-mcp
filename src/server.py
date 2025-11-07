@@ -2,8 +2,10 @@
 
 import os
 import sys
+import json
 import logging
-from typing import Optional
+from pathlib import Path
+from typing import Optional, Dict, Any
 from mcp.server.fastmcp import FastMCP
 from .client import BitbucketClient
 
@@ -15,6 +17,84 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ========== Tool Configuration ==========
+
+def load_tools_config() -> Dict[str, bool]:
+    """
+    Load tool configuration from configs/tools.json.
+
+    Returns:
+        Dictionary mapping tool names to their enabled status
+    """
+    # Get project root (parent of src directory)
+    project_root = Path(__file__).parent.parent
+    config_file = project_root / "configs" / "tools.json"
+
+    enabled_tools = {}
+
+    try:
+        if config_file.exists():
+            with open(config_file, 'r') as f:
+                config = json.load(f)
+
+            # Flatten the nested structure to get tool_name -> enabled mapping
+            for category, tools in config.get("tools", {}).items():
+                for tool_name, tool_config in tools.items():
+                    enabled_tools[tool_name] = tool_config.get("enabled", True)
+
+            logger.info(f"Loaded tool configuration from {config_file}")
+            logger.info(f"Enabled tools: {sum(enabled_tools.values())}/{len(enabled_tools)}")
+        else:
+            logger.warning(f"Tool configuration file not found: {config_file}")
+            logger.info("All tools will be enabled by default")
+    except Exception as e:
+        logger.error(f"Error loading tool configuration: {e}")
+        logger.info("All tools will be enabled by default")
+
+    return enabled_tools
+
+
+# Load configuration at startup
+_enabled_tools = load_tools_config()
+
+
+def is_tool_enabled(tool_name: str) -> bool:
+    """
+    Check if a tool is enabled in configuration.
+
+    Args:
+        tool_name: Name of the tool to check
+
+    Returns:
+        True if tool is enabled, False otherwise (defaults to True if not configured)
+    """
+    return _enabled_tools.get(tool_name, True)
+
+
+def conditional_tool(structured_output: bool = True):
+    """
+    Decorator that conditionally registers a tool based on configuration.
+
+    If the tool is enabled in configs/tools.json, it will be registered as an MCP tool.
+    Otherwise, the function remains as a regular async function without MCP registration.
+
+    Args:
+        structured_output: If True, enable structured output for dict returns.
+                          Returns proper JSON objects instead of serialized strings.
+                          Defaults to True for better client experience.
+    """
+    def decorator(func):
+        tool_name = func.__name__
+        if is_tool_enabled(tool_name):
+            logger.debug(f"Registering tool: {tool_name} (structured_output={structured_output})")
+            return mcp.tool(structured_output=structured_output)(func)
+        else:
+            logger.info(f"Tool disabled by configuration: {tool_name}")
+            return func
+    return decorator
+
 
 # Initialiser FastMCP
 mcp = FastMCP("Bitbucket MCP Server")
@@ -54,12 +134,12 @@ def get_client() -> BitbucketClient:
 
 # ========== Repository Tools ==========
 
-@mcp.tool()
+@conditional_tool()
 async def list_repositories(
     workspace: Optional[str] = None,
     name: Optional[str] = None,
     limit: int = 30
-) -> dict:
+) -> Dict[str, Any]:
     """
     List repositories in workspace.
 
@@ -75,8 +155,8 @@ async def list_repositories(
     return await client.list_repositories(workspace, name, limit)
 
 
-@mcp.tool()
-async def get_repository(repo_slug: str, workspace: Optional[str] = None) -> dict:
+@conditional_tool()
+async def get_repository(repo_slug: str, workspace: Optional[str] = None) -> Dict[str, Any]:
     """
     Get repository details.
 
@@ -93,13 +173,13 @@ async def get_repository(repo_slug: str, workspace: Optional[str] = None) -> dic
 
 # ========== Pull Request Tools ==========
 
-@mcp.tool()
+@conditional_tool()
 async def get_pull_requests(
     repo_slug: str,
     workspace: Optional[str] = None,
     state: str = "OPEN",
     limit: int = 30
-) -> dict:
+) -> Dict[str, Any]:
     """
     Get pull requests for a repository.
 
@@ -116,12 +196,12 @@ async def get_pull_requests(
     return await client.get_pull_requests(repo_slug, workspace, state, limit)
 
 
-@mcp.tool()
+@conditional_tool()
 async def get_pull_request(
     repo_slug: str,
     pull_request_id: str,
     workspace: Optional[str] = None
-) -> dict:
+) -> Dict[str, Any]:
     """
     Get details for a specific pull request.
 
@@ -137,7 +217,7 @@ async def get_pull_request(
     return await client.get_pull_request(repo_slug, pull_request_id, workspace)
 
 
-@mcp.tool()
+@conditional_tool()
 async def create_pull_request(
     repo_slug: str,
     title: str,
@@ -147,7 +227,7 @@ async def create_pull_request(
     workspace: Optional[str] = None,
     reviewers: Optional[list] = None,
     draft: bool = False
-) -> dict:
+) -> Dict[str, Any]:
     """
     Create a new pull request.
 
@@ -171,14 +251,14 @@ async def create_pull_request(
     )
 
 
-@mcp.tool()
+@conditional_tool()
 async def update_pull_request(
     repo_slug: str,
     pull_request_id: str,
     workspace: Optional[str] = None,
     title: Optional[str] = None,
     description: Optional[str] = None
-) -> dict:
+) -> Dict[str, Any]:
     """
     Update a pull request.
 
@@ -198,12 +278,12 @@ async def update_pull_request(
     )
 
 
-@mcp.tool()
+@conditional_tool()
 async def approve_pull_request(
     repo_slug: str,
     pull_request_id: str,
     workspace: Optional[str] = None
-) -> dict:
+) -> Dict[str, Any]:
     """
     Approve a pull request.
 
@@ -219,7 +299,7 @@ async def approve_pull_request(
     return await client.approve_pull_request(repo_slug, pull_request_id, workspace)
 
 
-@mcp.tool()
+@conditional_tool()
 async def unapprove_pull_request(
     repo_slug: str,
     pull_request_id: str,
@@ -241,13 +321,13 @@ async def unapprove_pull_request(
     return "Approval removed successfully"
 
 
-@mcp.tool()
+@conditional_tool()
 async def decline_pull_request(
     repo_slug: str,
     pull_request_id: str,
     workspace: Optional[str] = None,
     message: Optional[str] = None
-) -> dict:
+) -> Dict[str, Any]:
     """
     Decline a pull request.
 
@@ -266,14 +346,14 @@ async def decline_pull_request(
     )
 
 
-@mcp.tool()
+@conditional_tool()
 async def merge_pull_request(
     repo_slug: str,
     pull_request_id: str,
     workspace: Optional[str] = None,
     message: Optional[str] = None,
     strategy: str = "merge_commit"
-) -> dict:
+) -> Dict[str, Any]:
     """
     Merge a pull request.
 
@@ -295,12 +375,12 @@ async def merge_pull_request(
 
 # ========== Pull Request Comment Tools ==========
 
-@mcp.tool()
+@conditional_tool()
 async def get_pull_request_comments(
     repo_slug: str,
     pull_request_id: str,
     workspace: Optional[str] = None
-) -> dict:
+) -> Dict[str, Any]:
     """
     List comments on a pull request.
 
@@ -316,7 +396,7 @@ async def get_pull_request_comments(
     return await client.get_pull_request_comments(repo_slug, pull_request_id, workspace)
 
 
-@mcp.tool()
+@conditional_tool()
 async def add_pull_request_comment(
     repo_slug: str,
     pull_request_id: str,
@@ -326,7 +406,7 @@ async def add_pull_request_comment(
     inline_from: Optional[int] = None,
     inline_to: Optional[int] = None,
     pending: bool = False
-) -> dict:
+) -> Dict[str, Any]:
     """
     Add a comment to a pull request (general or inline).
 
@@ -350,7 +430,7 @@ async def add_pull_request_comment(
     )
 
 
-@mcp.tool()
+@conditional_tool()
 async def get_pull_request_diff(
     repo_slug: str,
     pull_request_id: str,
@@ -371,12 +451,12 @@ async def get_pull_request_diff(
     return await client.get_pull_request_diff(repo_slug, pull_request_id, workspace)
 
 
-@mcp.tool()
+@conditional_tool()
 async def get_pull_request_activity(
     repo_slug: str,
     pull_request_id: str,
     workspace: Optional[str] = None
-) -> dict:
+) -> Dict[str, Any]:
     """
     Get activity log for a pull request.
 
@@ -392,12 +472,12 @@ async def get_pull_request_activity(
     return await client.get_pull_request_activity(repo_slug, pull_request_id, workspace)
 
 
-@mcp.tool()
+@conditional_tool()
 async def get_pull_request_commits(
     repo_slug: str,
     pull_request_id: str,
     workspace: Optional[str] = None
-) -> dict:
+) -> Dict[str, Any]:
     """
     Get commits on a pull request.
 
@@ -413,12 +493,12 @@ async def get_pull_request_commits(
     return await client.get_pull_request_commits(repo_slug, pull_request_id, workspace)
 
 
-@mcp.tool()
+@conditional_tool()
 async def get_pull_request_statuses(
     repo_slug: str,
     pull_request_id: str,
     workspace: Optional[str] = None
-) -> dict:
+) -> Dict[str, Any]:
     """
     Get build/CI statuses for a pull request.
 
@@ -440,12 +520,12 @@ async def get_pull_request_statuses(
     return await client.get_pull_request_statuses(repo_slug, pull_request_id, workspace)
 
 
-@mcp.tool()
+@conditional_tool()
 async def get_pull_request_diffstat(
     repo_slug: str,
     pull_request_id: str,
     workspace: Optional[str] = None
-) -> dict:
+) -> Dict[str, Any]:
     """
     Get file modification statistics for a pull request.
 
@@ -468,14 +548,14 @@ async def get_pull_request_diffstat(
 
 # ========== Pipeline Tools ==========
 
-@mcp.tool()
+@conditional_tool()
 async def list_pipeline_runs(
     repo_slug: str,
     workspace: Optional[str] = None,
     status: Optional[str] = None,
     target_branch: Optional[str] = None,
     limit: int = 30
-) -> dict:
+) -> Dict[str, Any]:
     """
     List pipeline runs for a repository.
 
@@ -495,12 +575,12 @@ async def list_pipeline_runs(
     )
 
 
-@mcp.tool()
+@conditional_tool()
 async def get_pipeline_run(
     repo_slug: str,
     pipeline_uuid: str,
     workspace: Optional[str] = None
-) -> dict:
+) -> Dict[str, Any]:
     """
     Get details for a specific pipeline run.
 
@@ -516,12 +596,12 @@ async def get_pipeline_run(
     return await client.get_pipeline_run(repo_slug, pipeline_uuid, workspace)
 
 
-@mcp.tool()
+@conditional_tool()
 async def get_pipeline_steps(
     repo_slug: str,
     pipeline_uuid: str,
     workspace: Optional[str] = None
-) -> dict:
+) -> Dict[str, Any]:
     """
     List steps for a pipeline run.
 
@@ -537,7 +617,7 @@ async def get_pipeline_steps(
     return await client.get_pipeline_steps(repo_slug, pipeline_uuid, workspace)
 
 
-@mcp.tool()
+@conditional_tool()
 async def get_pipeline_step_logs(
     repo_slug: str,
     pipeline_uuid: str,

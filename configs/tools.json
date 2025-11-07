@@ -1,0 +1,96 @@
+{
+  "$schema": "Tool configuration for Bitbucket MCP Server",
+  "description": "Enable or disable MCP tools by setting 'enabled' to true or false",
+  "tools": {
+    "repositories": {
+      "list_repositories": {
+        "enabled": true,
+        "description": "List repositories in workspace"
+      },
+      "get_repository": {
+        "enabled": true,
+        "description": "Get repository details"
+      }
+    },
+    "pull_requests": {
+      "get_pull_requests": {
+        "enabled": true,
+        "description": "List pull requests for a repository"
+      },
+      "get_pull_request": {
+        "enabled": true,
+        "description": "Get details for a specific pull request"
+      },
+      "create_pull_request": {
+        "enabled": true,
+        "description": "Create a new pull request"
+      },
+      "update_pull_request": {
+        "enabled": true,
+        "description": "Update a pull request"
+      },
+      "approve_pull_request": {
+        "enabled": true,
+        "description": "Approve a pull request"
+      },
+      "unapprove_pull_request": {
+        "enabled": true,
+        "description": "Remove approval from a pull request"
+      },
+      "decline_pull_request": {
+        "enabled": true,
+        "description": "Decline a pull request"
+      },
+      "merge_pull_request": {
+        "enabled": false,
+        "description": "Merge a pull request"
+      },
+      "get_pull_request_comments": {
+        "enabled": true,
+        "description": "List comments on a pull request"
+      },
+      "add_pull_request_comment": {
+        "enabled": true,
+        "description": "Add a comment to a pull request"
+      },
+      "get_pull_request_diff": {
+        "enabled": true,
+        "description": "Get diff for a pull request"
+      },
+      "get_pull_request_activity": {
+        "enabled": true,
+        "description": "Get activity log for a pull request"
+      },
+      "get_pull_request_commits": {
+        "enabled": true,
+        "description": "Get commits on a pull request"
+      },
+      "get_pull_request_statuses": {
+        "enabled": true,
+        "description": "Get build/CI statuses for a pull request"
+      },
+      "get_pull_request_diffstat": {
+        "enabled": true,
+        "description": "Get file modification statistics for a pull request"
+      }
+    },
+    "pipelines": {
+      "list_pipeline_runs": {
+        "enabled": true,
+        "description": "List pipeline runs for a repository"
+      },
+      "get_pipeline_run": {
+        "enabled": true,
+        "description": "Get details for a specific pipeline run"
+      },
+      "get_pipeline_steps": {
+        "enabled": true,
+        "description": "List steps for a pipeline run"
+      },
+      "get_pipeline_step_logs": {
+        "enabled": true,
+        "description": "Get logs for a specific pipeline step"
+      }
+    }
+  }
+}

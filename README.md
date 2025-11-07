@@ -10,6 +10,8 @@ A Python-based Model Context Protocol (MCP) server for Bitbucket API, optimized 
 - **Comprehensive API Coverage**: Pull requests, comments, repositories, pipelines, build statuses
 - **FastMCP Framework**: Built on the official FastMCP Python framework
 - **Async/Await**: Fully asynchronous for high performance
+- **Configurable Tools**: Enable/disable individual tools via `configs/tools.json`
+- **Structured Responses**: Returns proper JSON objects, not serialized strings
 
 ## Requirements
 
@@ -108,6 +110,70 @@ Add to your `claude_desktop_config.json`:
 - `get_pipeline_run` - Get pipeline details
 - `get_pipeline_steps` - List pipeline steps
 - `get_pipeline_step_logs` - Get step logs
+
+## Tool Configuration
+
+You can enable or disable individual MCP tools by editing `configs/tools.json`. This allows you to customize which tools are available to MCP clients.
+
+### Configuration File
+
+```json
+{
+  "tools": {
+    "repositories": {
+      "list_repositories": {
+        "enabled": true,
+        "description": "List repositories in workspace"
+      }
+    },
+    "pull_requests": {
+      "update_pull_request": {
+        "enabled": false,
+        "description": "Update a pull request"
+      }
+    }
+  }
+}
+```
+
+### Enabling/Disabling Tools
+
+1. Edit `configs/tools.json`
+2. Set `"enabled": false` for tools you want to disable
+3. Rebuild the container: `./scripts/build.sh`
+4. Restart the container: `./scripts/run.sh`
+
+**Note**: Disabled tools will not appear in the MCP tool list and cannot be called by clients.
+
+## Response Format
+
+All MCP tools return structured JSON responses via FastMCP's `structured_output` feature. The MCP protocol wraps responses in a `CallToolResult` with two formats:
+
+- **`content`**: Human-readable text representation (for display)
+- **`structuredContent`**: Machine-readable JSON object (for programmatic use)
+
+### Example Response
+
+When calling `get_pull_request`, the response includes:
+
+```json
+{
+  "id": 31,
+  "title": "feat: add new feature",
+  "state": "OPEN",
+  "author": {
+    "display_name": "John Doe"
+  }
+}
+```
+
+**Benefits**:
+- No need to parse JSON strings
+- Direct access to nested objects
+- Type-safe responses
+- Better IDE autocomplete support
+
+**Technical Details**: Return types use `Dict[str, Any]` from Python's `typing` module, which FastMCP converts to proper JSON Schema for structured output.
 
 ## Development
 

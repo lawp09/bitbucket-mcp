@@ -9,7 +9,7 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 cd "$PROJECT_ROOT"
 
 echo "Building Bitbucket MCP container..."
-podman build -t bitbucket-mcp-py:latest .
+podman build --no-cache -t bitbucket-mcp-py:latest .
 
 echo ""
 echo "Build complete!"

@@ -1,5 +1,92 @@
 # Changelog - Bitbucket MCP Server Python
 
+## [1.2.0] - 2025-11-05
+
+### 🎉 New Features
+
+#### Tool Configuration System
+- **`configs/tools.json`** - Centralized configuration file to enable/disable individual MCP tools
+- **`conditional_tool()` decorator** - Smart decorator that respects tool configuration
+- **Dynamic tool registration** - Tools are only registered if enabled in configuration
+- **Category organization** - Tools grouped by domain (repositories, pull_requests, pipelines)
+
+**Configuration example**:
+```json
+{
+  "tools": {
+    "pull_requests": {
+      "update_pull_request": {
+        "enabled": false,
+        "description": "Update a pull request"
+      }
+    }
+  }
+}
+```
+
+**Benefits**:
+- Customize available tools per deployment
+- Reduce attack surface by disabling unused tools
+- Easy maintenance and auditing
+- No code changes required - just edit JSON file
+
+#### Structured Output Format
+- **`structured_output=True`** - Enabled by default in FastMCP tool decorator
+- **`Dict[str, Any]` return types** - Proper type hints for structured responses
+- **Dual response format** - Both human-readable text and machine-parseable JSON
+- **Direct object access** - No need to parse JSON strings
+
+**Response structure**:
+```json
+{
+  "content": [{"type": "text", "text": "..."}],
+  "structuredContent": {
+    "result": {
+      "id": 31,
+      "title": "feat: new feature",
+      "state": "OPEN"
+    }
+  }
+}
+```
+
+**Benefits**:
+- Better IDE autocomplete support
+- Type-safe response handling
+- Easier client integration
+- Backward compatible with text format
+
+### 🔧 Technical Changes
+
+- Changed all tool return types from `dict` to `Dict[str, Any]`
+- Added `configs/` directory to Dockerfile COPY instructions
+- Implemented `load_tools_config()` function for configuration loading
+- Added `is_tool_enabled()` helper function
+- Enhanced `conditional_tool()` decorator with `structured_output` parameter
+
+### 📚 Documentation
+
+- Updated README with Tool Configuration section
+- Added Response Format section with examples
+- Updated features list in README
+- Added comprehensive code examples
+
+### 🧪 Testing
+
+- New test file: `tests/test_structured_output.py` (4 tests)
+- All tests passing: 15/15 unit tests
+- Manual MCP server validation completed
+- Response format verified with real Bitbucket API
+
+### 📦 Container
+
+- Container now includes `configs/` folder
+- Configuration loaded at startup
+- Logs show enabled/disabled tool count
+- Backward compatible - all tools enabled by default if config missing
+
+---
+
 ## [1.1.0] - 2025-10-31
 
 ### 🎉 New Features
