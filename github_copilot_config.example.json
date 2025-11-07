@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "bitbucket-mcp": {
+      "command": "podman",
+      "args": [
+        "exec",
+        "-i",
+        "bitbucket-mcp",
+        "python",
+        "-m",
+        "src.main",
+        "--transport",
+        "stdio"
+      ]
+    }
+  }
+}

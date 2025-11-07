@@ -103,15 +103,54 @@ Add this configuration:
 }
 ```
 
+> 💡 **Security Tip**: While Claude Desktop supports inline `env` configuration, it's more secure to set these as system environment variables (step 2) and omit the `env` section entirely. This prevents accidentally committing credentials if you share your configuration file.
+
 ### 7. Restart Claude Desktop
 
 1. Completely quit Claude Desktop
 2. Relaunch Claude Desktop
 3. The Bitbucket MCP server should now be available
 
+## Alternative: GitHub Copilot (VS Code) Configuration
+
+If you're using GitHub Copilot in VS Code instead of Claude Desktop:
+
+**Configuration file location:**
+- **macOS**: `~/Library/Application Support/Code/User/mcp.json`
+- **Windows**: `%APPDATA%\Code\User\mcp.json`
+- **Linux**: `~/.config/Code/User/mcp.json`
+
+Add this configuration:
+
+```json
+{
+  "mcpServers": {
+    "bitbucket-mcp": {
+      "command": "podman",
+      "args": [
+        "exec",
+        "-i",
+        "bitbucket-mcp",
+        "python",
+        "-m",
+        "src.main",
+        "--transport",
+        "stdio"
+      ]
+    }
+  }
+}
+```
+
+> ⚠️ **Security Best Practice**: Do NOT include credentials in the JSON file. The server reads `BITBUCKET_USERNAME`, `BITBUCKET_TOKEN`, and `BITBUCKET_WORKSPACE` from environment variables (see step 2 above). This prevents accidentally committing credentials to version control.
+
+**After configuration:**
+1. Restart VS Code completely
+2. The Bitbucket MCP server should now be available in GitHub Copilot
+
 ## Verification
 
-In Claude Desktop, try:
+In Claude Desktop or GitHub Copilot, try:
 
 ```
 Can you list the repositories in my Bitbucket workspace?

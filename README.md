@@ -78,6 +78,62 @@ Add to your `claude_desktop_config.json`:
 }
 ```
 
+**Example file**: See `claude_desktop_config.example.json`
+
+> 💡 **Security Tip**: While Claude Desktop supports inline `env` configuration, it's more secure to set these as system environment variables and omit the `env` section entirely. This prevents accidentally committing credentials if you share your configuration file.
+
+## GitHub Copilot (VS Code) Configuration
+
+Add to your VS Code MCP config file:
+
+**macOS**: `~/Library/Application Support/Code/User/mcp.json`
+**Windows**: `%APPDATA%\Code\User\mcp.json`
+**Linux**: `~/.config/Code/User/mcp.json`
+
+```json
+{
+  "mcpServers": {
+    "bitbucket-mcp": {
+      "command": "podman",
+      "args": [
+        "exec",
+        "-i",
+        "bitbucket-mcp",
+        "python",
+        "-m",
+        "src.main",
+        "--transport",
+        "stdio"
+      ]
+    }
+  }
+}
+```
+
+**Example file**: See `github_copilot_config.example.json`
+
+> ⚠️ **Security Best Practice**: Do NOT include `BITBUCKET_USERNAME`, `BITBUCKET_TOKEN`, or `BITBUCKET_WORKSPACE` in the JSON configuration file. Instead, set them as environment variables in your shell (see below). This prevents accidentally committing credentials to version control.
+
+### Setting Environment Variables (Required)
+
+The Bitbucket MCP server reads credentials from environment variables that must be set in your shell:
+
+**macOS/Linux** (add to `~/.bashrc` or `~/.zshrc`):
+```bash
+export BITBUCKET_USERNAME="your-email@example.com"
+export BITBUCKET_TOKEN="your-192-char-app-password"
+export BITBUCKET_WORKSPACE="your-workspace-name"
+```
+
+**Windows** (PowerShell):
+```powershell
+[Environment]::SetEnvironmentVariable("BITBUCKET_USERNAME", "your-email@example.com", "User")
+[Environment]::SetEnvironmentVariable("BITBUCKET_TOKEN", "your-192-char-app-password", "User")
+[Environment]::SetEnvironmentVariable("BITBUCKET_WORKSPACE", "your-workspace-name", "User")
+```
+
+After setting environment variables, restart VS Code for the changes to take effect.
+
 ## Available MCP Tools
 
 ### Repository Tools
