@@ -382,7 +382,8 @@ class BitbucketClient:
         pull_request_id: str,
         workspace: Optional[str] = None,
         page_size: int = 10,
-        max_pages: Optional[int] = 1
+        max_pages: Optional[int] = 1,
+        unresolved_only: bool = False
     ) -> Dict[str, Any]:
         """
         Get all comments on a pull request with pagination support.
@@ -393,16 +394,21 @@ class BitbucketClient:
             workspace: Workspace name (defaults to self.workspace)
             page_size: Items per page (default: 10)
             max_pages: Maximum pages to fetch (default: 1)
+            unresolved_only: Filter to unresolved comments only (default: False)
 
         Returns:
-            Comments with aggregated values
+            Comments with aggregated values, including resolution field
         """
         ws = workspace or self.workspace
         config = PaginationConfig(page_size=page_size, max_pages=max_pages)
+        params = {}
+        if unresolved_only:
+            params["q"] = "resolution=null"
+
         return await aggregate_pages(
             self.client,
             f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}/comments",
-            {},
+            params,
             config
         )
 
@@ -500,7 +506,8 @@ class BitbucketClient:
             max_pages: Maximum pages to fetch (default: 1)
 
         Returns:
-            Activity log with aggregated values
+            Activity log with aggregated values. Comment objects include the resolution field
+            showing resolution status (null for unresolved comments, or resolution object with user and timestamp).
         """
         ws = workspace or self.workspace
         config = PaginationConfig(page_size=page_size, max_pages=max_pages)
@@ -510,6 +517,45 @@ class BitbucketClient:
             {},
             config
         )
+
+    async def get_pull_request_comment_stats(
+        self,
+        workspace: str,
+        repo_slug: str,
+        pull_request_id: int
+    ) -> Dict[str, Any]:
+        """
+        Get comment statistics for a pull request.
+
+        Args:
+            workspace: Workspace name
+            repo_slug: Repository slug
+            pull_request_id: Pull request ID
+
+        Returns:
+            Dictionary with comment statistics:
+            - total: Total number of comments
+            - resolved: Number of resolved comments
+            - unresolved: Number of unresolved comments
+        """
+        comments_response = await self.get_pull_request_comments(
+            repo_slug=repo_slug,
+            pull_request_id=str(pull_request_id),
+            workspace=workspace,
+            page_size=50,
+            max_pages=None
+        )
+
+        comments = comments_response.get("values", [])
+        total = len(comments)
+        resolved = sum(1 for comment in comments if comment.get("resolution") is not None)
+        unresolved = total - resolved
+
+        return {
+            "total": total,
+            "resolved": resolved,
+            "unresolved": unresolved
+        }
 
     async def get_pull_request_commits(
         self,

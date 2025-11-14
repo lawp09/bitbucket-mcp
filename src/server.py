@@ -221,10 +221,22 @@ async def get_pull_request(
         workspace: Workspace name (optional, defaults to configured workspace)
 
     Returns:
-        Pull request details
+        Pull request details with comment statistics:
+        - comment_stats: Object containing:
+          - total (int): Total number of comments
+          - resolved (int): Number of resolved comments
+          - unresolved (int): Number of unresolved comments
     """
     client = get_client()
-    return await client.get_pull_request(repo_slug, pull_request_id, workspace)
+    pr_data = await client.get_pull_request(repo_slug, pull_request_id, workspace)
+    ws = workspace or client.workspace
+
+    comment_stats = await client.get_pull_request_comment_stats(
+        ws, repo_slug, pull_request_id
+    )
+    pr_data["comment_stats"] = comment_stats
+
+    return pr_data
 
 
 @conditional_tool()
@@ -385,11 +397,35 @@ async def merge_pull_request(
 
 # ========== Pull Request Comment Tools ==========
 
+def _enrich_comment_with_resolution(comment: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Enrich a comment with resolution status fields.
+
+    Args:
+        comment: Comment object from API
+
+    Returns:
+        Comment with added fields: is_resolved, resolved_by, resolved_on
+    """
+    resolution = comment.get("resolution")
+    comment["is_resolved"] = resolution is not None
+
+    if resolution:
+        comment["resolved_by"] = resolution.get("user", {}).get("display_name")
+        comment["resolved_on"] = resolution.get("created_on")
+    else:
+        comment["resolved_by"] = None
+        comment["resolved_on"] = None
+
+    return comment
+
+
 @conditional_tool()
 async def get_pull_request_comments(
     repo_slug: str,
     pull_request_id: str,
     workspace: Optional[str] = None,
+    unresolved_only: bool = False,
     page_size: int = 10,
     max_pages: Optional[int] = 1
 ) -> Dict[str, Any]:
@@ -400,19 +436,28 @@ async def get_pull_request_comments(
         repo_slug: Repository slug
         pull_request_id: Pull request ID
         workspace: Workspace name (optional, defaults to configured workspace)
+        unresolved_only: If true, returns only unresolved comments (default: False)
         page_size: Items per page (default: 10, max recommended: 100)
         max_pages: Maximum pages to fetch (default: 1, max recommended: 10)
 
     Returns:
-        List of comments
+        List of comments enriched with resolution status:
+        - is_resolved (bool): True if comment is resolved
+        - resolved_by (string or null): User display name who resolved the comment
+        - resolved_on (string or null): Timestamp when comment was resolved
 
     Note:
         Fetching more than 10 pages or 300 items will trigger a warning.
     """
     client = get_client()
-    return await client.get_pull_request_comments(
-        repo_slug, pull_request_id, workspace, page_size, max_pages
+    result = await client.get_pull_request_comments(
+        repo_slug, pull_request_id, workspace, page_size, max_pages, unresolved_only
     )
+
+    if "values" in result:
+        result["values"] = [_enrich_comment_with_resolution(comment) for comment in result["values"]]
+
+    return result
 
 
 @conditional_tool()
@@ -489,15 +534,25 @@ async def get_pull_request_activity(
         max_pages: Maximum pages to fetch (default: 1, max recommended: 10)
 
     Returns:
-        Activity log with all events
+        Activity log with all events. Comment objects enriched with resolution status:
+        - is_resolved (bool): True if comment is resolved
+        - resolved_by (string or null): User display name who resolved the comment
+        - resolved_on (string or null): Timestamp when comment was resolved
 
     Note:
         Fetching more than 10 pages or 300 items will trigger a warning.
     """
     client = get_client()
-    return await client.get_pull_request_activity(
+    result = await client.get_pull_request_activity(
         repo_slug, pull_request_id, workspace, page_size, max_pages
     )
+
+    if "values" in result:
+        for activity in result["values"]:
+            if activity.get("type") == "comment" and "comment" in activity:
+                activity["comment"] = _enrich_comment_with_resolution(activity["comment"])
+
+    return result
 
 
 @conditional_tool()
