@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  bitbucket-mcp:
+    # Build configuration
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    # Image and container naming
+    image: bitbucket-mcp-py:latest
+    container_name: bitbucket-mcp
+
+    # Environment configuration
+    env_file:
+      - .env
+
+    # Keep container alive
+    command: tail -f /dev/null
+
+    # Container lifecycle
+    stdin_open: true
+    tty: false
+    restart: unless-stopped
+
+    # Resource limits (hard limits)
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        # Guaranteed resources
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+    # Health check to verify environment variables are set
+    healthcheck:
+      test:
+        - CMD
+        - sh
+        - -c
+        - 'test -n "$BITBUCKET_BASE_URL" && test -n "$BITBUCKET_USERNAME" && test -n "$BITBUCKET_PASSWORD"'
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+    # Logging configuration
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
