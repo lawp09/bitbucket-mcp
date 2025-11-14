@@ -13,6 +13,45 @@ A Python-based Model Context Protocol (MCP) server for Bitbucket API, optimized 
 - **Configurable Tools**: Enable/disable individual tools via `configs/tools.json`
 - **Structured Responses**: Returns proper JSON objects, not serialized strings
 
+## Quick Start with Docker Compose (Recommended)
+
+The easiest way to get started with the Bitbucket MCP Server is using Docker Compose. This approach handles container orchestration, environment management, and networking automatically.
+
+### Three Simple Steps
+
+1. **Copy environment file and add credentials**
+   ```bash
+   cp .env.example .env
+   # Edit .env and fill in your Bitbucket credentials:
+   # BITBUCKET_USERNAME=your-email@example.com
+   # BITBUCKET_TOKEN=your-192-char-app-password
+   # BITBUCKET_WORKSPACE=your-workspace
+   ```
+
+2. **Start the server**
+   ```bash
+   docker-compose up -d
+   ```
+
+3. **Configure Claude Desktop/Copilot**
+   Use the configuration examples below with container name `bitbucket-mcp`
+
+For detailed instructions, see [Docker Compose Setup Guide](docs/DOCKER_COMPOSE_GUIDE.md).
+
+### Approach Comparison
+
+| Feature | Docker Compose | Manual Scripts |
+|---------|---|---|
+| Setup Time | ~1 minute | ~5 minutes |
+| Environment Management | Automatic (.env) | Manual exports |
+| Container Lifecycle | Managed | Manual |
+| Configuration | Single file | Multiple scripts |
+| Debugging | `docker-compose logs` | `podman logs` |
+| Networking | Built-in | Manual mapping |
+| **Recommended for** | Most users | Advanced/CI scenarios |
+
+For complete setup instructions and troubleshooting, see the [Quick Start Guide](QUICKSTART.md).
+
 ## Requirements
 
 - Python 3.12+
@@ -48,6 +87,8 @@ export BITBUCKET_WORKSPACE="your-workspace"
 ```
 
 ## Claude Desktop Configuration
+
+See [Platform Compatibility Guide](PLATFORM_COMPATIBILITY.md) for OS-specific setup details.
 
 Add to your `claude_desktop_config.json`:
 
@@ -166,6 +207,88 @@ After setting environment variables, restart VS Code for the changes to take eff
 - `get_pipeline_run` - Get pipeline details
 - `get_pipeline_steps` - List pipeline steps
 - `get_pipeline_step_logs` - Get step logs
+
+## Pagination
+
+All tools that return lists now support pagination parameters to control data fetching:
+
+### Parameters
+
+- **`page_size`** (default: 10): Number of items per page
+  - Available on: `get_pull_request_comments`, `get_pull_request_activity`, `get_pull_request_commits`, `get_pull_request_statuses`, `get_pull_request_diffstat`, `get_pipeline_steps`
+
+- **`limit`** (default: 30): Items per page for repository and PR lists
+  - Available on: `list_repositories`, `get_pull_requests`, `list_pipeline_runs`
+
+- **`max_pages`** (default: 1): Maximum number of pages to fetch
+  - Available on: all list-returning tools
+  - Set to higher value to fetch multiple pages automatically
+
+### Recommended Limits
+
+- **Default**: 1 page (safe, fast)
+- **Maximum recommended**: 10 pages or 300 total items
+- Exceeding recommendations triggers a warning log
+
+### Examples
+
+**Fetch single page (default)**:
+```json
+{
+  "name": "get_pull_request_comments",
+  "arguments": {
+    "repo_slug": "my-repo",
+    "pull_request_id": 42
+  }
+}
+```
+Returns: Up to 10 comments
+
+**Fetch multiple pages**:
+```json
+{
+  "name": "get_pull_request_comments",
+  "arguments": {
+    "repo_slug": "my-repo",
+    "pull_request_id": 42,
+    "page_size": 20,
+    "max_pages": 5
+  }
+}
+```
+Returns: Up to 100 comments (20 per page × 5 pages)
+
+**Fetch all available pages** (use cautiously):
+```json
+{
+  "name": "list_repositories",
+  "arguments": {
+    "workspace": "my-workspace",
+    "max_pages": 999
+  }
+}
+```
+Returns: All repositories (stops at API limit or when no more data)
+
+### Response Format
+
+Responses maintain Bitbucket's original format:
+```json
+{
+  "values": [...],        // Aggregated items from all fetched pages
+  "pagelen": 10,          // Items per page
+  "size": 150,            // Total items available
+  "page": 1,              // Page number
+  "next": "https://..."   // URL to next page (if more data available but not fetched)
+}
+```
+
+### Performance Notes
+
+- Default behavior (1 page) ensures fast responses
+- Multi-page fetching increases response time linearly
+- Use `max_pages` wisely based on your use case
+- Monitor warning logs for large fetches
 
 ## Tool Configuration
 

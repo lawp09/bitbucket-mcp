@@ -44,6 +44,8 @@ htmlcov/
 
 # Environment variables
 .env
+.env.*
+!.env.example
 .env.local
 .env.*.local
 

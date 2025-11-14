@@ -1,12 +1,40 @@
 # Quick Start Guide - Bitbucket MCP Server
 
+> **Recommended**: Use Docker Compose for the fastest setup. It handles container orchestration and configuration automatically.
+
+## Quick Start with Docker Compose
+
+### TL;DR - 5 Steps
+
+```bash
+# 1. Clone and navigate
+cd /Users/ulawsph/app/ai/mcp/bitbucket-mcp-py
+
+# 2. Set your credentials
+export BITBUCKET_USERNAME="your-email@example.com"
+export BITBUCKET_TOKEN="your-192-char-token"
+export BITBUCKET_WORKSPACE="your-workspace"
+
+# 3. Start with Docker Compose
+docker-compose up -d
+
+# 4. Verify it's running
+docker-compose logs bitbucket-mcp
+
+# 5. Configure Claude Desktop (see below)
+```
+
+That's it! Your Bitbucket MCP server is running.
+
+For detailed Docker Compose setup including environment configuration options, networking, and troubleshooting, see [DOCKER_COMPOSE_GUIDE.md](docs/DOCKER_COMPOSE_GUIDE.md).
+
 ## Prerequisites
 
 - Python 3.12+
-- Podman or Docker installed
+- Podman, Docker, or Docker Compose installed
 - Bitbucket account with app password
 
-## 5-Minute Installation
+## Alternative: Manual Installation with Scripts
 
 ### 1. Get a Bitbucket App Password
 
@@ -150,7 +178,7 @@ Add this configuration:
 
 ## Verification
 
-In Claude Desktop or GitHub Copilot, try:
+Both Docker Compose and manual script-based installations work the same way. In Claude Desktop or GitHub Copilot, try:
 
 ```
 Can you list the repositories in my Bitbucket workspace?
@@ -161,6 +189,8 @@ or
 ```
 Show me the open pull requests on repo X
 ```
+
+The MCP server is running and accessible regardless of which installation method you used.
 
 ## Useful Commands
 
@@ -292,6 +322,93 @@ Once configured, you'll have access to these tools in Claude:
 **Pipelines**
 - `list_pipeline_runs` - List executions
 - `get_pipeline_step_logs` - View logs
+
+## Working with Pagination
+
+### Basic Pagination
+
+By default, all list-returning tools fetch only the first page (10-30 items depending on the tool):
+
+```python
+# Fetch first page only (default)
+comments = await client.get_pull_request_comments(
+    repo_slug="my-repo",
+    pull_request_id=42
+)
+# Returns: Up to 10 comments
+```
+
+### Fetching Multiple Pages
+
+Use the `max_pages` parameter to fetch more data:
+
+```python
+# Fetch up to 3 pages
+comments = await client.get_pull_request_comments(
+    repo_slug="my-repo",
+    pull_request_id=42,
+    page_size=20,      # 20 items per page
+    max_pages=3        # Fetch up to 3 pages
+)
+# Returns: Up to 60 comments (20 × 3)
+```
+
+### Fetching All Available Data
+
+Set `max_pages` to a high value to fetch all available pages:
+
+```python
+# Fetch all repositories
+repos = await client.list_repositories(
+    workspace="my-workspace",
+    max_pages=100  # High enough to get all data
+)
+# Returns: All repositories in the workspace
+```
+
+### Via MCP Protocol
+
+When using the MCP server via Claude or other MCP clients:
+
+**Example 1: Default single page**
+```json
+{
+  "tool": "get_pull_request_commits",
+  "arguments": {
+    "repo_slug": "my-repo",
+    "pull_request_id": 123
+  }
+}
+```
+
+**Example 2: Multiple pages**
+```json
+{
+  "tool": "get_pull_request_commits",
+  "arguments": {
+    "repo_slug": "my-repo",
+    "pull_request_id": 123,
+    "page_size": 50,
+    "max_pages": 5
+  }
+}
+```
+
+### Best Practices
+
+1. **Start with defaults**: Default 1-page fetching is fast and safe
+2. **Use max_pages for known bounds**: If you know data size, set appropriate limit
+3. **Monitor warnings**: Fetching >10 pages or >300 items triggers warnings
+4. **Consider performance**: Each page requires an API call
+5. **Check `next` in response**: Indicates if more data is available
+
+### Response Structure
+
+All paginated responses include:
+- `values`: Array of items (aggregated from all fetched pages)
+- `pagelen`: Items per page
+- `size`: Total items available (from Bitbucket API)
+- `next`: URL to next page (if more data exists but wasn't fetched)
 
 ## Usage Examples in Claude
 

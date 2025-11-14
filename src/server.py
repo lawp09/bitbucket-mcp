@@ -138,21 +138,26 @@ def get_client() -> BitbucketClient:
 async def list_repositories(
     workspace: Optional[str] = None,
     name: Optional[str] = None,
-    limit: int = 30
+    limit: int = 30,
+    max_pages: Optional[int] = 1
 ) -> Dict[str, Any]:
     """
-    List repositories in workspace.
+    List repositories in workspace with pagination support.
 
     Args:
         workspace: Workspace name (optional, defaults to configured workspace)
         name: Filter by repository name (partial match supported)
-        limit: Maximum number of repositories to return (default: 30)
+        limit: Maximum number of repositories per page (default: 30)
+        max_pages: Maximum pages to fetch (default: 1, max recommended: 10)
 
     Returns:
         Paginated list of repositories
+
+    Note:
+        Fetching more than 10 pages or 300 items will trigger a warning.
     """
     client = get_client()
-    return await client.list_repositories(workspace, name, limit)
+    return await client.list_repositories(workspace, name, limit, max_pages)
 
 
 @conditional_tool()
@@ -178,22 +183,27 @@ async def get_pull_requests(
     repo_slug: str,
     workspace: Optional[str] = None,
     state: str = "OPEN",
-    limit: int = 30
+    limit: int = 30,
+    max_pages: Optional[int] = 1
 ) -> Dict[str, Any]:
     """
-    Get pull requests for a repository.
+    Get pull requests for a repository with pagination support.
 
     Args:
         repo_slug: Repository slug
         workspace: Workspace name (optional, defaults to configured workspace)
         state: Pull request state (OPEN, MERGED, DECLINED, SUPERSEDED) (default: OPEN)
-        limit: Maximum number of pull requests to return (default: 30)
+        limit: Maximum number of pull requests per page (default: 30)
+        max_pages: Maximum pages to fetch (default: 1, max recommended: 10)
 
     Returns:
         Paginated list of pull requests
+
+    Note:
+        Fetching more than 10 pages or 300 items will trigger a warning.
     """
     client = get_client()
-    return await client.get_pull_requests(repo_slug, workspace, state, limit)
+    return await client.get_pull_requests(repo_slug, workspace, state, limit, max_pages)
 
 
 @conditional_tool()
@@ -379,21 +389,30 @@ async def merge_pull_request(
 async def get_pull_request_comments(
     repo_slug: str,
     pull_request_id: str,
-    workspace: Optional[str] = None
+    workspace: Optional[str] = None,
+    page_size: int = 10,
+    max_pages: Optional[int] = 1
 ) -> Dict[str, Any]:
     """
-    List comments on a pull request.
+    List comments on a pull request with pagination support.
 
     Args:
         repo_slug: Repository slug
         pull_request_id: Pull request ID
         workspace: Workspace name (optional, defaults to configured workspace)
+        page_size: Items per page (default: 10, max recommended: 100)
+        max_pages: Maximum pages to fetch (default: 1, max recommended: 10)
 
     Returns:
         List of comments
+
+    Note:
+        Fetching more than 10 pages or 300 items will trigger a warning.
     """
     client = get_client()
-    return await client.get_pull_request_comments(repo_slug, pull_request_id, workspace)
+    return await client.get_pull_request_comments(
+        repo_slug, pull_request_id, workspace, page_size, max_pages
+    )
 
 
 @conditional_tool()
@@ -455,57 +474,79 @@ async def get_pull_request_diff(
 async def get_pull_request_activity(
     repo_slug: str,
     pull_request_id: str,
-    workspace: Optional[str] = None
+    workspace: Optional[str] = None,
+    page_size: int = 10,
+    max_pages: Optional[int] = 1
 ) -> Dict[str, Any]:
     """
-    Get activity log for a pull request.
+    Get activity log for a pull request with pagination support.
 
     Args:
         repo_slug: Repository slug
         pull_request_id: Pull request ID
         workspace: Workspace name (optional, defaults to configured workspace)
+        page_size: Items per page (default: 10, max recommended: 100)
+        max_pages: Maximum pages to fetch (default: 1, max recommended: 10)
 
     Returns:
         Activity log with all events
+
+    Note:
+        Fetching more than 10 pages or 300 items will trigger a warning.
     """
     client = get_client()
-    return await client.get_pull_request_activity(repo_slug, pull_request_id, workspace)
+    return await client.get_pull_request_activity(
+        repo_slug, pull_request_id, workspace, page_size, max_pages
+    )
 
 
 @conditional_tool()
 async def get_pull_request_commits(
     repo_slug: str,
     pull_request_id: str,
-    workspace: Optional[str] = None
+    workspace: Optional[str] = None,
+    page_size: int = 10,
+    max_pages: Optional[int] = 1
 ) -> Dict[str, Any]:
     """
-    Get commits on a pull request.
+    Get commits on a pull request with pagination support.
 
     Args:
         repo_slug: Repository slug
         pull_request_id: Pull request ID
         workspace: Workspace name (optional, defaults to configured workspace)
+        page_size: Items per page (default: 10, max recommended: 100)
+        max_pages: Maximum pages to fetch (default: 1, max recommended: 10)
 
     Returns:
         List of commits
+
+    Note:
+        Fetching more than 10 pages or 300 items will trigger a warning.
     """
     client = get_client()
-    return await client.get_pull_request_commits(repo_slug, pull_request_id, workspace)
+    return await client.get_pull_request_commits(
+        repo_slug, pull_request_id, workspace, page_size, max_pages
+    )
 
 
 @conditional_tool()
 async def get_pull_request_statuses(
     repo_slug: str,
     pull_request_id: str,
-    workspace: Optional[str] = None
+    workspace: Optional[str] = None,
+    page_size: int = 10,
+    max_pages: Optional[int] = 1
 ) -> Dict[str, Any]:
     """
-    Get build/CI statuses for a pull request.
+    Get build/CI statuses for a pull request with pagination support.
 
     Args:
         repo_slug: Repository slug
         pull_request_id: Pull request ID
         workspace: Workspace name (optional, defaults to configured workspace)
+        page_size: Items per page (default: 10, max recommended: 100)
+        max_pages: Maximum pages to fetch (default: 1, max recommended: 10)
 
     Returns:
         List of build statuses (Jenkins, CI/CD, tests, etc.)
@@ -515,24 +556,33 @@ async def get_pull_request_statuses(
         - name: Build name/description
         - url: Link to the build details
         - created_on: Timestamp of the status
+
+    Note:
+        Fetching more than 10 pages or 300 items will trigger a warning.
     """
     client = get_client()
-    return await client.get_pull_request_statuses(repo_slug, pull_request_id, workspace)
+    return await client.get_pull_request_statuses(
+        repo_slug, pull_request_id, workspace, page_size, max_pages
+    )
 
 
 @conditional_tool()
 async def get_pull_request_diffstat(
     repo_slug: str,
     pull_request_id: str,
-    workspace: Optional[str] = None
+    workspace: Optional[str] = None,
+    page_size: int = 10,
+    max_pages: Optional[int] = 1
 ) -> Dict[str, Any]:
     """
-    Get file modification statistics for a pull request.
+    Get file modification statistics for a pull request with pagination support.
 
     Args:
         repo_slug: Repository slug
         pull_request_id: Pull request ID
         workspace: Workspace name (optional, defaults to configured workspace)
+        page_size: Items per page (default: 10, max recommended: 100)
+        max_pages: Maximum pages to fetch (default: 1, max recommended: 10)
 
     Returns:
         Statistics with lines added/removed per file
@@ -541,9 +591,14 @@ async def get_pull_request_diffstat(
         - lines_added: Number of lines added
         - lines_removed: Number of lines removed
         - new.path: File path after changes
+
+    Note:
+        Fetching more than 10 pages or 300 items will trigger a warning.
     """
     client = get_client()
-    return await client.get_pull_request_diffstat(repo_slug, pull_request_id, workspace)
+    return await client.get_pull_request_diffstat(
+        repo_slug, pull_request_id, workspace, page_size, max_pages
+    )
 
 
 # ========== Pipeline Tools ==========
@@ -554,24 +609,29 @@ async def list_pipeline_runs(
     workspace: Optional[str] = None,
     status: Optional[str] = None,
     target_branch: Optional[str] = None,
-    limit: int = 30
+    limit: int = 30,
+    max_pages: Optional[int] = 1
 ) -> Dict[str, Any]:
     """
-    List pipeline runs for a repository.
+    List pipeline runs for a repository with pagination support.
 
     Args:
         repo_slug: Repository slug
         workspace: Workspace name (optional, defaults to configured workspace)
         status: Filter pipelines by status (PENDING, IN_PROGRESS, SUCCESSFUL, FAILED, ERROR, STOPPED)
         target_branch: Filter pipelines by target branch
-        limit: Maximum number of pipelines to return (default: 30)
+        limit: Maximum number of pipelines per page (default: 30)
+        max_pages: Maximum pages to fetch (default: 1, max recommended: 10)
 
     Returns:
         List of pipeline runs
+
+    Note:
+        Fetching more than 10 pages or 300 items will trigger a warning.
     """
     client = get_client()
     return await client.list_pipeline_runs(
-        repo_slug, workspace, status, target_branch, limit
+        repo_slug, workspace, status, target_branch, limit, max_pages
     )
 
 
@@ -600,21 +660,30 @@ async def get_pipeline_run(
 async def get_pipeline_steps(
     repo_slug: str,
     pipeline_uuid: str,
-    workspace: Optional[str] = None
+    workspace: Optional[str] = None,
+    page_size: int = 10,
+    max_pages: Optional[int] = 1
 ) -> Dict[str, Any]:
     """
-    List steps for a pipeline run.
+    List steps for a pipeline run with pagination support.
 
     Args:
         repo_slug: Repository slug
         pipeline_uuid: Pipeline UUID
         workspace: Workspace name (optional, defaults to configured workspace)
+        page_size: Items per page (default: 10, max recommended: 100)
+        max_pages: Maximum pages to fetch (default: 1, max recommended: 10)
 
     Returns:
         List of pipeline steps
+
+    Note:
+        Fetching more than 10 pages or 300 items will trigger a warning.
     """
     client = get_client()
-    return await client.get_pipeline_steps(repo_slug, pipeline_uuid, workspace)
+    return await client.get_pipeline_steps(
+        repo_slug, pipeline_uuid, workspace, page_size, max_pages
+    )
 
 
 @conditional_tool()

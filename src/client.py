@@ -5,6 +5,8 @@ import logging
 from typing import Any, Dict, List, Optional
 import httpx
 
+from .utils.pagination import PaginationConfig, aggregate_pages
+
 logger = logging.getLogger(__name__)
 
 
@@ -76,27 +78,28 @@ class BitbucketClient:
         self,
         workspace: Optional[str] = None,
         name: Optional[str] = None,
-        limit: int = 30
+        limit: int = 30,
+        max_pages: Optional[int] = 1
     ) -> Dict[str, Any]:
         """
-        List repositories in workspace.
+        List repositories in workspace with pagination support.
 
         Args:
             workspace: Workspace name (defaults to self.workspace)
             name: Filter by repository name (partial match)
-            limit: Maximum number of repositories to return
+            limit: Items per page (default: 30)
+            max_pages: Maximum pages to fetch (default: 1)
 
         Returns:
-            Paginated list of repositories
+            Paginated list of repositories with aggregated values
         """
         ws = workspace or self.workspace
-        params = {"pagelen": limit}
+        config = PaginationConfig(page_size=limit, max_pages=max_pages)
+        params = {}
         if name:
             params["q"] = f'name~"{name}"'
 
-        response = await self.client.get(f"/repositories/{ws}", params=params)
-        response.raise_for_status()
-        return response.json()
+        return await aggregate_pages(self.client, f"/repositories/{ws}", params, config)
 
     async def get_repository(
         self,
@@ -125,29 +128,32 @@ class BitbucketClient:
         repo_slug: str,
         workspace: Optional[str] = None,
         state: str = "OPEN",
-        limit: int = 30
+        limit: int = 30,
+        max_pages: Optional[int] = 1
     ) -> Dict[str, Any]:
         """
-        List pull requests for a repository.
+        List pull requests for a repository with pagination support.
 
         Args:
             repo_slug: Repository slug
             workspace: Workspace name (defaults to self.workspace)
             state: PR state (OPEN, MERGED, DECLINED, SUPERSEDED)
-            limit: Maximum number of PRs to return
+            limit: Items per page (default: 30)
+            max_pages: Maximum pages to fetch (default: 1)
 
         Returns:
-            Paginated list of pull requests
+            Paginated list of pull requests with aggregated values
         """
         ws = workspace or self.workspace
-        params = {"state": state, "pagelen": limit}
+        config = PaginationConfig(page_size=limit, max_pages=max_pages)
+        params = {"state": state}
 
-        response = await self.client.get(
+        return await aggregate_pages(
+            self.client,
             f"/repositories/{ws}/{repo_slug}/pullrequests",
-            params=params
+            params,
+            config
         )
-        response.raise_for_status()
-        return response.json()
 
     async def get_pull_request(
         self,
@@ -374,25 +380,31 @@ class BitbucketClient:
         self,
         repo_slug: str,
         pull_request_id: str,
-        workspace: Optional[str] = None
+        workspace: Optional[str] = None,
+        page_size: int = 10,
+        max_pages: Optional[int] = 1
     ) -> Dict[str, Any]:
         """
-        Get all comments on a pull request.
+        Get all comments on a pull request with pagination support.
 
         Args:
             repo_slug: Repository slug
             pull_request_id: Pull request ID
             workspace: Workspace name (defaults to self.workspace)
+            page_size: Items per page (default: 10)
+            max_pages: Maximum pages to fetch (default: 1)
 
         Returns:
-            List of comments
+            Comments with aggregated values
         """
         ws = workspace or self.workspace
-        response = await self.client.get(
-            f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}/comments"
+        config = PaginationConfig(page_size=page_size, max_pages=max_pages)
+        return await aggregate_pages(
+            self.client,
+            f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}/comments",
+            {},
+            config
         )
-        response.raise_for_status()
-        return response.json()
 
     async def add_pull_request_comment(
         self,
@@ -473,49 +485,61 @@ class BitbucketClient:
         self,
         repo_slug: str,
         pull_request_id: str,
-        workspace: Optional[str] = None
+        workspace: Optional[str] = None,
+        page_size: int = 10,
+        max_pages: Optional[int] = 1
     ) -> Dict[str, Any]:
         """
-        Get activity log for a pull request.
+        Get activity log for a pull request with pagination support.
 
         Args:
             repo_slug: Repository slug
             pull_request_id: Pull request ID
             workspace: Workspace name (defaults to self.workspace)
+            page_size: Items per page (default: 10)
+            max_pages: Maximum pages to fetch (default: 1)
 
         Returns:
-            Activity log
+            Activity log with aggregated values
         """
         ws = workspace or self.workspace
-        response = await self.client.get(
-            f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}/activity"
+        config = PaginationConfig(page_size=page_size, max_pages=max_pages)
+        return await aggregate_pages(
+            self.client,
+            f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}/activity",
+            {},
+            config
         )
-        response.raise_for_status()
-        return response.json()
 
     async def get_pull_request_commits(
         self,
         repo_slug: str,
         pull_request_id: str,
-        workspace: Optional[str] = None
+        workspace: Optional[str] = None,
+        page_size: int = 10,
+        max_pages: Optional[int] = 1
     ) -> Dict[str, Any]:
         """
-        Get commits on a pull request.
+        Get commits on a pull request with pagination support.
 
         Args:
             repo_slug: Repository slug
             pull_request_id: Pull request ID
             workspace: Workspace name (defaults to self.workspace)
+            page_size: Items per page (default: 10)
+            max_pages: Maximum pages to fetch (default: 1)
 
         Returns:
-            List of commits
+            Commits with aggregated values
         """
         ws = workspace or self.workspace
-        response = await self.client.get(
-            f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}/commits"
+        config = PaginationConfig(page_size=page_size, max_pages=max_pages)
+        return await aggregate_pages(
+            self.client,
+            f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}/commits",
+            {},
+            config
         )
-        response.raise_for_status()
-        return response.json()
 
     # ========== Pipelines ==========
 
@@ -525,35 +549,38 @@ class BitbucketClient:
         workspace: Optional[str] = None,
         status: Optional[str] = None,
         target_branch: Optional[str] = None,
-        limit: int = 30
+        limit: int = 30,
+        max_pages: Optional[int] = 1
     ) -> Dict[str, Any]:
         """
-        List pipeline runs for a repository.
+        List pipeline runs for a repository with pagination support.
 
         Args:
             repo_slug: Repository slug
             workspace: Workspace name (defaults to self.workspace)
             status: Filter by status (PENDING, IN_PROGRESS, SUCCESSFUL, FAILED, etc.)
             target_branch: Filter by target branch
-            limit: Maximum number of pipelines to return
+            limit: Items per page (default: 30)
+            max_pages: Maximum pages to fetch (default: 1)
 
         Returns:
-            List of pipeline runs
+            List of pipeline runs with aggregated values
         """
         ws = workspace or self.workspace
-        params = {"pagelen": limit}
+        config = PaginationConfig(page_size=limit, max_pages=max_pages)
+        params = {}
 
         if status:
             params["status"] = status
         if target_branch:
             params["target.branch"] = target_branch
 
-        response = await self.client.get(
+        return await aggregate_pages(
+            self.client,
             f"/repositories/{ws}/{repo_slug}/pipelines/",
-            params=params
+            params,
+            config
         )
-        response.raise_for_status()
-        return response.json()
 
     async def get_pipeline_run(
         self,
@@ -583,25 +610,31 @@ class BitbucketClient:
         self,
         repo_slug: str,
         pipeline_uuid: str,
-        workspace: Optional[str] = None
+        workspace: Optional[str] = None,
+        page_size: int = 10,
+        max_pages: Optional[int] = 1
     ) -> Dict[str, Any]:
         """
-        List steps for a pipeline run.
+        List steps for a pipeline run with pagination support.
 
         Args:
             repo_slug: Repository slug
             pipeline_uuid: Pipeline UUID
             workspace: Workspace name (defaults to self.workspace)
+            page_size: Items per page (default: 10)
+            max_pages: Maximum pages to fetch (default: 1)
 
         Returns:
-            List of pipeline steps
+            Pipeline steps with aggregated values
         """
         ws = workspace or self.workspace
-        response = await self.client.get(
-            f"/repositories/{ws}/{repo_slug}/pipelines/{pipeline_uuid}/steps/"
+        config = PaginationConfig(page_size=page_size, max_pages=max_pages)
+        return await aggregate_pages(
+            self.client,
+            f"/repositories/{ws}/{repo_slug}/pipelines/{pipeline_uuid}/steps/",
+            {},
+            config
         )
-        response.raise_for_status()
-        return response.json()
 
     async def get_pipeline_step_logs(
         self,
@@ -635,18 +668,22 @@ class BitbucketClient:
         self,
         repo_slug: str,
         pull_request_id: str,
-        workspace: Optional[str] = None
+        workspace: Optional[str] = None,
+        page_size: int = 10,
+        max_pages: Optional[int] = 1
     ) -> Dict[str, Any]:
         """
-        Get build/CI statuses for a pull request.
+        Get build/CI statuses for a pull request with pagination support.
 
         Args:
             repo_slug: Repository slug
             pull_request_id: Pull request ID
             workspace: Workspace name (defaults to self.workspace)
+            page_size: Items per page (default: 10)
+            max_pages: Maximum pages to fetch (default: 1)
 
         Returns:
-            List of build statuses (Jenkins, CI/CD, tests, etc.)
+            Build statuses with aggregated values
             Each status contains:
             - state: SUCCESSFUL, FAILED, INPROGRESS, STOPPED
             - key: Unique identifier for the build
@@ -655,25 +692,31 @@ class BitbucketClient:
             - created_on: Timestamp of the status
         """
         ws = workspace or self.workspace
-        response = await self.client.get(
-            f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}/statuses"
+        config = PaginationConfig(page_size=page_size, max_pages=max_pages)
+        return await aggregate_pages(
+            self.client,
+            f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}/statuses",
+            {},
+            config
         )
-        response.raise_for_status()
-        return response.json()
 
     async def get_pull_request_diffstat(
         self,
         repo_slug: str,
         pull_request_id: str,
-        workspace: Optional[str] = None
+        workspace: Optional[str] = None,
+        page_size: int = 10,
+        max_pages: Optional[int] = 1
     ) -> Dict[str, Any]:
         """
-        Get file modification statistics for a pull request.
+        Get file modification statistics for a pull request with pagination support.
 
         Args:
             repo_slug: Repository slug
             pull_request_id: Pull request ID
             workspace: Workspace name (defaults to self.workspace)
+            page_size: Items per page (default: 10)
+            max_pages: Maximum pages to fetch (default: 1)
 
         Returns:
             Statistics with lines added/removed per file
@@ -684,6 +727,7 @@ class BitbucketClient:
             - new.path: File path after changes
         """
         ws = workspace or self.workspace
+        config = PaginationConfig(page_size=page_size, max_pages=max_pages)
 
         # First get the PR to extract the diffstat URL from links
         pr_response = await self.client.get(
@@ -699,13 +743,12 @@ class BitbucketClient:
             if diffstat_url.startswith(self.base_url):
                 diffstat_url = diffstat_url[len(self.base_url):]
 
-            response = await self.client.get(diffstat_url)
-            response.raise_for_status()
-            return response.json()
+            return await aggregate_pages(self.client, diffstat_url, {}, config)
         else:
             # Fallback to direct URL if links not available
-            response = await self.client.get(
-                f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}/diffstat"
+            return await aggregate_pages(
+                self.client,
+                f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}/diffstat",
+                {},
+                config
             )
-            response.raise_for_status()
-            return response.json()
