@@ -1,0 +1,22 @@
+# Production Docker Compose Override
+# This file provides hardened configuration for production deployment
+# Use with: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up
+
+services:
+  bitbucket-mcp:
+    read_only: true
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    healthcheck:
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

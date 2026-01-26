@@ -1,7 +1,38 @@
 #!/bin/bash
 # Run the Bitbucket MCP container in background
+# NOTE: For easier setup, consider using Docker Compose instead. See: docker-compose up -d
+# This script is maintained for manual/advanced usage. For most users, docker-compose is recommended.
 
 set -e
+
+# Handle --help flag
+if [[ "$1" == "--help" || "$1" == "-h" ]]; then
+    echo "run.sh - Run Bitbucket MCP container"
+    echo ""
+    echo "USAGE:"
+    echo "  ./scripts/run.sh [OPTIONS]"
+    echo ""
+    echo "ENVIRONMENT VARIABLES:"
+    echo "  BITBUCKET_USERNAME    Your Bitbucket email address (required)"
+    echo "  BITBUCKET_TOKEN       Your 192-char Bitbucket App Password (required)"
+    echo "  BITBUCKET_WORKSPACE   Your Bitbucket workspace slug (required)"
+    echo ""
+    echo "OPTIONS:"
+    echo "  --help, -h    Show this help message"
+    echo ""
+    echo "EXAMPLES:"
+    echo "  export BITBUCKET_USERNAME='your-email@example.com'"
+    echo "  export BITBUCKET_TOKEN='your-192-char-token'"
+    echo "  export BITBUCKET_WORKSPACE='your-workspace'"
+    echo "  ./scripts/run.sh"
+    echo ""
+    echo "ALTERNATIVES:"
+    echo "  For easier setup with Docker Compose (RECOMMENDED):"
+    echo "    Set environment variables in .env file"
+    echo "    docker-compose up -d"
+    echo ""
+    exit 0
+fi
 
 # Check required environment variables
 if [ -z "$BITBUCKET_USERNAME" ] || [ -z "$BITBUCKET_TOKEN" ] || [ -z "$BITBUCKET_WORKSPACE" ]; then

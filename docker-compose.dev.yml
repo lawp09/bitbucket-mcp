@@ -1,0 +1,16 @@
+# Development override for docker-compose
+# Use with: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+version: '3.8'
+
+services:
+  bitbucket-mcp:
+    volumes:
+      - ./src:/app/src:rw
+      - ./configs:/app/configs:rw
+    restart: "no"
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"

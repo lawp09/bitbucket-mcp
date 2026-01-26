@@ -1,5 +1,56 @@
 # Changelog - Bitbucket MCP Server Python
 
+## [Unreleased]
+
+### Changed
+
+- `max_pages` in `PaginationConfig` now accepts `None` to fetch all pages without limit
+- Updated type from `int` to `Optional[int]` with proper null checks
+
+---
+
+## [1.3.0] - 2025-11-14
+
+### Added
+
+- Comment resolution status support for pull request comments
+- New `unresolved_only` filter parameter for `get_pull_request_comments` tool
+- Comment resolution statistics in `get_pull_request` tool via new `comment_stats` object
+- Fields: `is_resolved`, `resolved_by`, `resolved_on` in comment objects for tracking resolution status and timestamps
+- Enhanced `get_pull_request_activity` with comment resolution data
+
+### Technical Details
+
+**New comment response fields**:
+```json
+{
+  "id": 123,
+  "content": "Great improvement!",
+  "is_resolved": true,
+  "resolved_by": {"display_name": "Jane Reviewer"},
+  "resolved_on": "2025-11-14T10:30:00.000000+00:00"
+}
+```
+
+**New comment_stats in PR response**:
+```json
+{
+  "comment_stats": {
+    "total": 15,
+    "resolved": 10,
+    "unresolved": 5
+  }
+}
+```
+
+**Benefits**:
+- Track comment thread resolution status
+- Filter for unresolved comments to focus on actionable feedback
+- Monitor PR review progress with comment statistics
+- Improved comment management in code review workflows
+
+---
+
 ## [1.2.0] - 2025-11-05
 
 ### 🎉 New Features

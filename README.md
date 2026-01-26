@@ -192,10 +192,10 @@ After setting environment variables, restart VS Code for the changes to take eff
 - `merge_pull_request` - Merge a pull request
 
 ### Comment Tools
-- `get_pull_request_comments` - List all PR comments
+- `get_pull_request_comments` - List all PR comments (supports filtering by resolution status)
 - `add_pull_request_comment` - Add general or inline comment
 - `get_pull_request_diff` - Get unified diff
-- `get_pull_request_activity` - Get activity log
+- `get_pull_request_activity` - Get activity log with comment resolution data
 - `get_pull_request_commits` - Get PR commits
 
 ### Build Status Tools
@@ -289,6 +289,62 @@ Responses maintain Bitbucket's original format:
 - Multi-page fetching increases response time linearly
 - Use `max_pages` wisely based on your use case
 - Monitor warning logs for large fetches
+
+## Comment Resolution
+
+Pull request comments now support resolution tracking to manage comment threads and discussions.
+
+### get_pull_request_comments
+
+**New Parameter:**
+- `unresolved_only` (boolean, optional) - Filter to show only unresolved comments
+
+**New Response Fields** (for each comment):
+- `is_resolved` (boolean) - Whether the comment is marked as resolved
+- `resolved_by` (object) - User who resolved the comment (if resolved)
+- `resolved_on` (string) - ISO 8601 timestamp when comment was resolved (if resolved)
+
+**Example: Get only unresolved comments**:
+```json
+{
+  "name": "get_pull_request_comments",
+  "arguments": {
+    "repo_slug": "my-repo",
+    "pull_request_id": 42,
+    "unresolved_only": true
+  }
+}
+```
+
+Returns: Only unresolved comments with their details
+
+### get_pull_request_activity
+
+**Enhanced Comment Data** - Comment events in activity log now include:
+- `is_resolved` (boolean) - Resolution status
+- `resolved_by` (object) - User who resolved the comment
+- `resolved_on` (string) - Timestamp of resolution
+
+### get_pull_request
+
+**New Response Field:**
+- `comment_stats` (object) - Comment statistics for the PR:
+  - `total` (integer) - Total number of comments
+  - `resolved` (integer) - Number of resolved comments
+  - `unresolved` (integer) - Number of unresolved comments
+
+**Example Response**:
+```json
+{
+  "id": 42,
+  "title": "feat: new feature",
+  "comment_stats": {
+    "total": 15,
+    "resolved": 10,
+    "unresolved": 5
+  }
+}
+```
 
 ## Tool Configuration
 
