@@ -36,8 +36,6 @@ The easiest way to get started with the Bitbucket MCP Server is using Docker Com
 3. **Configure Claude Desktop/Copilot**
    Use the configuration examples below with container name `bitbucket-mcp`
 
-For detailed instructions, see [Docker Compose Setup Guide](docs/DOCKER_COMPOSE_GUIDE.md).
-
 ### Approach Comparison
 
 | Feature | Docker Compose | Manual Scripts |
@@ -87,8 +85,6 @@ export BITBUCKET_WORKSPACE="your-workspace"
 ```
 
 ## Claude Desktop Configuration
-
-See [Platform Compatibility Guide](PLATFORM_COMPATIBILITY.md) for OS-specific setup details.
 
 Add to your `claude_desktop_config.json`:
 

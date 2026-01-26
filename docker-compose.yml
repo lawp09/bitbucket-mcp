@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   bitbucket-mcp:
     # Build configuration
@@ -40,7 +38,7 @@ services:
         - CMD
         - sh
         - -c
-        - 'test -n "$BITBUCKET_BASE_URL" && test -n "$BITBUCKET_USERNAME" && test -n "$BITBUCKET_PASSWORD"'
+        - 'test -n "$BITBUCKET_USERNAME" && test -n "$BITBUCKET_TOKEN" && test -n "$BITBUCKET_WORKSPACE"'
       interval: 30s
       timeout: 10s
       retries: 3

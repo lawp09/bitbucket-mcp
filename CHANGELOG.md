@@ -7,6 +7,16 @@
 - `max_pages` in `PaginationConfig` now accepts `None` to fetch all pages without limit
 - Updated type from `int` to `Optional[int]` with proper null checks
 
+### Fixed
+
+- `docker-compose.yml`: removed obsolete `version` attribute, fixed healthcheck to use correct variables
+- `Makefile`: fixed `verify` command to use correct env vars, `test` now runs locally
+
+### Removed
+
+- `docker-compose.dev.yml` and `docker-compose.prod.yml` (single docker-compose.yml is sufficient)
+- `docs/DOCKER_COMPOSE_GUIDE.md`, `docs/MIGRATION_GUIDE.md`, `docs/PLATFORM_COMPATIBILITY.md` (simplified for public repo)
+
 ---
 
 ## [1.3.0] - 2025-11-14
