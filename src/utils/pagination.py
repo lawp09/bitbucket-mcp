@@ -15,16 +15,16 @@ class PaginationConfig:
 
     Attributes:
         page_size: Number of items per page (default: 10)
-        max_pages: Maximum number of pages to fetch (default: 1)
+        max_pages: Maximum number of pages to fetch (default: 1, None for unlimited)
         max_items: Maximum total items to fetch (default: None, no limit)
     """
     page_size: int = 10
-    max_pages: int = 1
+    max_pages: Optional[int] = 1
     max_items: Optional[int] = None
 
     def __post_init__(self):
         """Validate configuration and log warnings"""
-        if self.max_pages > 10:
+        if self.max_pages is not None and self.max_pages > 10:
             logger.warning(
                 f"max_pages is set to {self.max_pages} which exceeds recommended limit of 10"
             )
@@ -63,7 +63,7 @@ async def paginate_bitbucket(
     pages_fetched = 0
     items_fetched = 0
 
-    while current_url and pages_fetched < config.max_pages:
+    while current_url and (config.max_pages is None or pages_fetched < config.max_pages):
         response = await client.get(current_url, params=params if pages_fetched == 0 else None)
         response.raise_for_status()
 
@@ -78,7 +78,7 @@ async def paginate_bitbucket(
         next_url = data.get("next")
         should_continue = (
             next_url and
-            pages_fetched < config.max_pages and
+            (config.max_pages is None or pages_fetched < config.max_pages) and
             (config.max_items is None or items_fetched < config.max_items)
         )
 

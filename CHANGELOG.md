@@ -1,5 +1,14 @@
 # Changelog - Bitbucket MCP Server Python
 
+## [Unreleased]
+
+### Changed
+
+- `max_pages` in `PaginationConfig` now accepts `None` to fetch all pages without limit
+- Updated type from `int` to `Optional[int]` with proper null checks
+
+---
+
 ## [1.3.0] - 2025-11-14
 
 ### Added
