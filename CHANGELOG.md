@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Simplified README from 587 to 122 lines (removed verbose sections)
+
 ### Added
 
 - Secure credentials management with system keychain support (`src/utils/credentials.py`)
