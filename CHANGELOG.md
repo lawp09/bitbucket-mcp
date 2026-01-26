@@ -2,10 +2,17 @@
 
 ## [Unreleased]
 
+### Added
+
+- Secure credentials management with system keychain support (`src/utils/credentials.py`)
+- Optional `keyring` dependency for keychain integration
+- `.env.example` template file for credential configuration
+
 ### Changed
 
 - `max_pages` in `PaginationConfig` now accepts `None` to fetch all pages without limit
 - Updated type from `int` to `Optional[int]` with proper null checks
+- Credentials now loaded via `get_credentials()` with env var → keychain fallback
 
 ### Fixed
 

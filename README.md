@@ -58,13 +58,33 @@ For complete setup instructions and troubleshooting, see the [Quick Start Guide]
 
 ## Quick Start
 
-### 1. Set Environment Variables
+### 1. Configure Credentials
+
+**Option A: Environment Variables (Recommended)**
+
+Add to your shell profile (`~/.zshrc` or `~/.bashrc`):
 
 ```bash
 export BITBUCKET_USERNAME="your-email@example.com"
 export BITBUCKET_TOKEN="your-192-char-app-password"
 export BITBUCKET_WORKSPACE="your-workspace"
 ```
+
+**Option B: System Keychain (More Secure)**
+
+Install optional keyring support and store credentials securely:
+
+```bash
+# Install keyring support
+pip install 'bitbucket-mcp-py[keyring]'
+
+# Store credentials (macOS example)
+security add-generic-password -s "bitbucket-mcp" -a "bitbucket_username" -w "your-email"
+security add-generic-password -s "bitbucket-mcp" -a "bitbucket_token" -w "your-token"
+security add-generic-password -s "bitbucket-mcp" -a "bitbucket_workspace" -w "your-workspace"
+```
+
+> **Security Note**: Avoid using `.env` files for credentials as they can be accidentally committed. Environment variables in your shell profile or system keychain are safer.
 
 ### 2. Build Container
 

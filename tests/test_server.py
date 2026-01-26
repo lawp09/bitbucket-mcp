@@ -16,7 +16,7 @@ def test_get_client_missing_env_vars():
         with pytest.raises(ValueError) as exc_info:
             get_client()
 
-        assert "Missing required environment variables" in str(exc_info.value)
+        assert "Missing required credentials" in str(exc_info.value)
 
 
 def test_get_client_with_env_vars():
@@ -76,7 +76,7 @@ async def test_mcp_server_tools_registered():
     assert "list_repositories" in tool_names
     assert "add_pull_request_comment" in tool_names
     assert "approve_pull_request" in tool_names
-    assert "merge_pull_request" in tool_names
+    # merge_pull_request is disabled by default in configs/tools.json
     assert "get_pull_request_statuses" in tool_names
     assert "get_pull_request_diffstat" in tool_names
 

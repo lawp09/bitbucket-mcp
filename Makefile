@@ -1,49 +1,53 @@
 .PHONY: help build up down restart logs shell test verify clean
 
-# Detect docker/podman
-COMPOSE := $(shell command -v docker-compose 2>/dev/null || command -v podman-compose 2>/dev/null)
+# Detect container runtime (prefer podman, fallback to docker)
+RUNTIME := $(shell command -v podman 2>/dev/null || command -v docker 2>/dev/null)
+IMAGE := bitbucket-mcp-py:latest
+CONTAINER := bitbucket-mcp
 
 help:
 	@echo "Usage: make [target]"
 	@echo ""
 	@echo "Targets:"
-	@echo "  build    Build Docker image"
+	@echo "  build    Build container image"
 	@echo "  up       Start container"
 	@echo "  down     Stop container"
 	@echo "  restart  Restart container"
 	@echo "  logs     Show logs (tail -f)"
 	@echo "  shell    Open shell in container"
-	@echo "  test     Run tests"
+	@echo "  test     Run tests locally"
 	@echo "  verify   Test Bitbucket authentication"
-	@echo "  clean    Remove containers and images"
+	@echo "  clean    Remove container and image"
+	@echo ""
+	@echo "Using: $(RUNTIME)"
 
 build:
-	$(COMPOSE) build --no-cache
+	$(RUNTIME) build --no-cache -t $(IMAGE) .
 
 up:
-	$(COMPOSE) up -d
+	$(RUNTIME) run -d --name $(CONTAINER) --env-file .env $(IMAGE)
 
 down:
-	$(COMPOSE) down
+	$(RUNTIME) stop $(CONTAINER) 2>/dev/null || true
+	$(RUNTIME) rm $(CONTAINER) 2>/dev/null || true
 
-restart:
-	$(COMPOSE) restart
+restart: down up
 
 logs:
-	$(COMPOSE) logs -f
+	$(RUNTIME) logs -f $(CONTAINER)
 
 shell:
-	$(COMPOSE) exec bitbucket-mcp /bin/bash
+	$(RUNTIME) exec -it $(CONTAINER) /bin/bash
 
 test:
 	pytest -v tests/
 
 verify:
-	$(COMPOSE) exec -T bitbucket-mcp python -c \
+	$(RUNTIME) exec $(CONTAINER) python -c \
 		"import os; from src.client import BitbucketClient; BitbucketClient(os.environ['BITBUCKET_USERNAME'], os.environ['BITBUCKET_TOKEN'], os.environ['BITBUCKET_WORKSPACE']); print('OK: Bitbucket client initialized')"
 
-clean:
-	$(COMPOSE) down --rmi local
+clean: down
+	$(RUNTIME) rmi $(IMAGE) 2>/dev/null || true
 	@find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	@find . -type d -name .pytest_cache -exec rm -rf {} + 2>/dev/null || true
 

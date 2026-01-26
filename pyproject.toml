@@ -17,6 +17,9 @@ dev = [
     "pytest-cov>=6.0.0",
     "pytest-httpx>=0.30.0",
 ]
+keyring = [
+    "keyring>=25.0.0",
+]
 
 [build-system]
 requires = ["hatchling"]

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 from mcp.server.fastmcp import FastMCP
 from .client import BitbucketClient
+from .utils.credentials import get_credentials
 
 # Configuration logging vers stderr uniquement (container-friendly)
 logging.basicConfig(
@@ -116,18 +117,13 @@ def get_client() -> BitbucketClient:
     global _bitbucket_client
 
     if _bitbucket_client is None:
-        email = os.getenv("BITBUCKET_USERNAME")
-        token = os.getenv("BITBUCKET_TOKEN")
-        workspace = os.getenv("BITBUCKET_WORKSPACE")
-
-        if not all([email, token, workspace]):
-            raise ValueError(
-                "Missing required environment variables: "
-                "BITBUCKET_USERNAME, BITBUCKET_TOKEN, BITBUCKET_WORKSPACE"
-            )
-
-        _bitbucket_client = BitbucketClient(email, token, workspace)
-        logger.info(f"Bitbucket client initialized for workspace: {workspace}")
+        credentials = get_credentials()
+        _bitbucket_client = BitbucketClient(
+            credentials.username,
+            credentials.token,
+            credentials.workspace
+        )
+        logger.info(f"Bitbucket client initialized for workspace: {credentials.workspace}")
 
     return _bitbucket_client
 
