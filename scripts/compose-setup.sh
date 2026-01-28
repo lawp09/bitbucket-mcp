@@ -77,7 +77,7 @@ ${BLUE}Usage:${NC}
 ${BLUE}Options:${NC}
     --help, -h              Show this help message
     --username <email>      Set Bitbucket username (email)
-    --token <token>         Set Bitbucket app password
+    --token <token>         Set Bitbucket API token
     --workspace <name>      Set Bitbucket workspace name
     --no-build              Skip compose build
     --no-up                 Skip compose up
@@ -233,13 +233,13 @@ prompt_credentials() {
 
     # Prompt for token if not provided via flag
     if [ -z "$BITBUCKET_TOKEN" ]; then
-        echo -e "${BLUE}Enter your Bitbucket app password:${NC}"
-        echo -e "  ${YELLOW}(Generate at: https://bitbucket.org/account/settings/app-passwords/)${NC}"
+        echo -e "${BLUE}Enter your Bitbucket API token:${NC}"
+        echo -e "  ${YELLOW}(Generate at: https://id.atlassian.com/manage-profile/security/api-tokens)${NC}"
         read -sp "  > " BITBUCKET_TOKEN
         echo
 
         if [ -z "$BITBUCKET_TOKEN" ]; then
-            print_error "Bitbucket app password is required"
+            print_error "Bitbucket API token is required"
             exit 1
         fi
     fi
