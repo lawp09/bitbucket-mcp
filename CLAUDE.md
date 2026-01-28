@@ -48,7 +48,7 @@ scripts/                 # Shell scripts (build.sh, run.sh)
 ```bash
 # Add to ~/.zshrc or ~/.bashrc
 export BITBUCKET_USERNAME="email@example.com"
-export BITBUCKET_TOKEN="your-192-char-app-password"
+export BITBUCKET_TOKEN="your-api-token"
 export BITBUCKET_WORKSPACE="your-workspace"
 ```
 
