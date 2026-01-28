@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Removed
+
+- `QUICKSTART.md` (redundant with README.md, contained broken references)
+
 ### Changed
 
 - Simplified README from 587 to 122 lines (removed verbose sections)
