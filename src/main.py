@@ -21,7 +21,7 @@ Examples:
 
 Environment variables required:
   BITBUCKET_USERNAME      - Your Bitbucket account email
-  BITBUCKET_TOKEN      - Your Bitbucket app password (192 chars)
+  BITBUCKET_TOKEN      - Your Bitbucket API token
   BITBUCKET_WORKSPACE  - Your Bitbucket workspace name
 """
     )

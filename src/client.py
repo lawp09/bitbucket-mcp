@@ -19,7 +19,7 @@ class BitbucketClient:
 
         Args:
             email: Bitbucket account email
-            token: App password or API token (192 characters)
+            token: Bitbucket API token
             workspace: Bitbucket workspace name
         """
         self.email = email

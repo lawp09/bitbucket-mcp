@@ -17,11 +17,11 @@ A Model Context Protocol (MCP) server for Bitbucket API, optimized for container
 ```bash
 # Add to ~/.zshrc or ~/.bashrc
 export BITBUCKET_USERNAME="your-email@example.com"
-export BITBUCKET_TOKEN="your-app-password"
+export BITBUCKET_TOKEN="your-api-token"
 export BITBUCKET_WORKSPACE="your-workspace"
 ```
 
-> Get your app password at: https://bitbucket.org/account/settings/app-passwords/
+> Get your API token at: https://id.atlassian.com/manage-profile/security/api-tokens
 
 ### 2. Build & Run
 
@@ -109,7 +109,7 @@ pytest tests/test_client.py -v
 
 - Python 3.12+
 - Podman or Docker
-- Bitbucket app password
+- Bitbucket API token
 
 ## License
 

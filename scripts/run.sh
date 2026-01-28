@@ -14,7 +14,7 @@ if [[ "$1" == "--help" || "$1" == "-h" ]]; then
     echo ""
     echo "ENVIRONMENT VARIABLES:"
     echo "  BITBUCKET_USERNAME    Your Bitbucket email address (required)"
-    echo "  BITBUCKET_TOKEN       Your 192-char Bitbucket App Password (required)"
+    echo "  BITBUCKET_TOKEN       Your Bitbucket API token (required)"
     echo "  BITBUCKET_WORKSPACE   Your Bitbucket workspace slug (required)"
     echo ""
     echo "OPTIONS:"
