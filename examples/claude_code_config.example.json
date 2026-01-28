@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "bitbucket": {
+    "bitbucket-mcp": {
       "command": "podman",
       "args": [
         "exec",
@@ -13,12 +13,7 @@
         "stdio",
         "--loggers",
         "stderr"
-      ],
-      "env": {
-        "BITBUCKET_USERNAME": "your-email@example.com",
-        "BITBUCKET_TOKEN": "your-192-char-app-password",
-        "BITBUCKET_WORKSPACE": "your-workspace-name"
-      }
+      ]
     }
   }
 }
