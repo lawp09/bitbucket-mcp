@@ -4,7 +4,7 @@
 
 **Name**: bitbucket-mcp-py
 **Type**: MCP (Model Context Protocol) Server for Bitbucket API
-**Version**: 1.3.0
+**Version**: 1.4.0
 **Python**: 3.12+
 **Container Runtime**: Podman (preferred) or Docker
 

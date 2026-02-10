@@ -2,37 +2,40 @@
 
 ## [Unreleased]
 
-### Changed
+### Added
 
-- Replace "app password" references with "API token" and update URLs to Atlassian ID
-- Simplified README from 587 to 122 lines (removed verbose sections)
+- GitHub Actions CI workflow (tests + build on push/PR to main)
 
-### Removed
+---
 
-- `QUICKSTART.md` (redundant with README.md, contained broken references)
-- `env.example` (duplicate of `.env.example`)
+## [1.4.0] - 2026-02-10
 
 ### Added
 
+- Slim response transformers to reduce LLM token usage (PR #5)
 - Secure credentials management with system keychain support (`src/utils/credentials.py`)
 - Optional `keyring` dependency for keychain integration
 - `.env.example` template file for credential configuration
 
 ### Changed
 
-- `max_pages` in `PaginationConfig` now accepts `None` to fetch all pages without limit
-- Updated type from `int` to `Optional[int]` with proper null checks
+- Consolidated config examples into `examples/` folder (PR #4)
+- Replace "app password" references with "API token" and update URLs to Atlassian ID (PR #3)
+- Simplified README from 587 to 122 lines
+- `max_pages` in `PaginationConfig` now accepts `None` for unlimited pagination
 - Credentials now loaded via `get_credentials()` with env var → keychain fallback
 
 ### Fixed
 
-- `docker-compose.yml`: removed obsolete `version` attribute, fixed healthcheck to use correct variables
-- `Makefile`: fixed `verify` command to use correct env vars, `test` now runs locally
+- `docker-compose.yml`: removed obsolete `version` attribute, fixed healthcheck variables
+- `Makefile`: fixed `verify` command env vars, `test` now runs locally
 
 ### Removed
 
-- `docker-compose.dev.yml` and `docker-compose.prod.yml` (single docker-compose.yml is sufficient)
-- `docs/DOCKER_COMPOSE_GUIDE.md`, `docs/MIGRATION_GUIDE.md`, `docs/PLATFORM_COMPATIBILITY.md` (simplified for public repo)
+- `QUICKSTART.md` (redundant with README.md)
+- `env.example` (duplicate of `.env.example`)
+- `docker-compose.dev.yml` and `docker-compose.prod.yml` (single file sufficient)
+- `docs/DOCKER_COMPOSE_GUIDE.md`, `docs/MIGRATION_GUIDE.md`, `docs/PLATFORM_COMPATIBILITY.md`
 
 ---
 
