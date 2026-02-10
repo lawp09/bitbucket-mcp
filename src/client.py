@@ -283,7 +283,8 @@ class BitbucketClient:
         """
         ws = workspace or self.workspace
         response = await self.client.post(
-            f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}/approve"
+            f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}/approve",
+            json={}  # Body vide requis par l'API Bitbucket
         )
         response.raise_for_status()
         return response.json()
