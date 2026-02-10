@@ -33,10 +33,14 @@ src/
 ├── client.py            # BitbucketClient (async, Basic Auth)
 └── utils/
     ├── credentials.py   # Secure credentials (env vars + keychain)
-    └── pagination.py    # Pagination utilities (max_pages, max_items)
+    ├── pagination.py    # Pagination utilities (max_pages, max_items)
+    └── transformers.py  # Slim response transformers (reduce LLM token usage)
 
 configs/
 └── tools.json           # Tool enable/disable configuration
+
+.github/workflows/
+└── ci.yml               # CI pipeline (tests + build)
 
 tests/                   # pytest test suite
 scripts/                 # Shell scripts (build.sh, run.sh)
@@ -110,6 +114,17 @@ Edit `configs/tools.json` to enable/disable tools:
 }
 ```
 
+### Slim Responses
+
+All tool responses pass through transformers (`src/utils/transformers.py`) that strip unnecessary Bitbucket API fields (links, avatars, nested metadata) to reduce LLM token usage. Each entity type has a dedicated `slim_*` function.
+
+## CI/CD
+
+GitHub Actions workflow (`.github/workflows/ci.yml`):
+- **Triggers**: push to `main`, PR targeting `main`
+- **Steps**: Install deps, run pytest with coverage, build package
+- Python 3.12, pip cache enabled
+
 ## Development
 
 ### Running Tests
@@ -162,18 +177,20 @@ RUNTIME := $(shell command -v podman 2>/dev/null || command -v docker 2>/dev/nul
 | `src/utils/credentials.py` | Secure credentials (env vars → keychain fallback) |
 | `src/utils/pagination.py` | Pagination config and aggregation |
 | `configs/tools.json` | Tool enable/disable settings |
+| `src/utils/transformers.py` | Slim response transformers (token reduction) |
 | `Makefile` | Container management (podman/docker) |
+| `.github/workflows/ci.yml` | GitHub Actions CI pipeline |
 | `.env.example` | Template for credentials (copy to .env) |
 
 ## Recent Changes
 
+- Added GitHub Actions CI workflow (pytest + coverage + build)
+- Added slim response transformers to reduce LLM token usage (`src/utils/transformers.py`)
+- Configured hatch wheel build for `src/` layout
+- Added `respx` to dev dependencies
 - Added secure credentials management with keychain support (`src/utils/credentials.py`)
-- Added optional `keyring` dependency for system keychain integration
 - Simplified Makefile (uses podman/docker directly, no docker-compose)
-- Removed redundant docker-compose.dev.yml and docker-compose.prod.yml
-- Fixed healthcheck to use correct env vars (USERNAME, TOKEN, WORKSPACE)
 - Added `max_pages=None` support for unlimited pagination
-- Removed excessive documentation (3000+ lines in docs/)
 
 ## Conventions
 
