@@ -9,6 +9,17 @@ from typing import Optional, Dict, Any
 from mcp.server.fastmcp import FastMCP
 from .client import BitbucketClient
 from .utils.credentials import get_credentials
+from .utils.transformers import (
+    slim_repository, slim_repository_list,
+    slim_pull_request, slim_pull_request_list, slim_pull_request_created,
+    slim_status_list,
+    slim_commit_list,
+    slim_diffstat_list,
+    slim_comment, slim_comment_list,
+    slim_activity_list,
+    slim_pipeline_run, slim_pipeline_run_list,
+    slim_pipeline_step_list,
+)
 
 # Configuration logging vers stderr uniquement (container-friendly)
 logging.basicConfig(
@@ -134,7 +145,7 @@ def get_client() -> BitbucketClient:
 async def list_repositories(
     workspace: Optional[str] = None,
     name: Optional[str] = None,
-    limit: int = 30,
+    page_size: int = 30,
     max_pages: Optional[int] = 1
 ) -> Dict[str, Any]:
     """
@@ -143,7 +154,7 @@ async def list_repositories(
     Args:
         workspace: Workspace name (optional, defaults to configured workspace)
         name: Filter by repository name (partial match supported)
-        limit: Maximum number of repositories per page (default: 30)
+        page_size: Items per page (default: 30)
         max_pages: Maximum pages to fetch (default: 1, max recommended: 10)
 
     Returns:
@@ -153,7 +164,8 @@ async def list_repositories(
         Fetching more than 10 pages or 300 items will trigger a warning.
     """
     client = get_client()
-    return await client.list_repositories(workspace, name, limit, max_pages)
+    result = await client.list_repositories(workspace, name, page_size, max_pages)
+    return slim_repository_list(result)
 
 
 @conditional_tool()
@@ -169,7 +181,8 @@ async def get_repository(repo_slug: str, workspace: Optional[str] = None) -> Dic
         Repository information
     """
     client = get_client()
-    return await client.get_repository(repo_slug, workspace)
+    result = await client.get_repository(repo_slug, workspace)
+    return slim_repository(result)
 
 
 # ========== Pull Request Tools ==========
@@ -179,7 +192,7 @@ async def get_pull_requests(
     repo_slug: str,
     workspace: Optional[str] = None,
     state: str = "OPEN",
-    limit: int = 30,
+    page_size: int = 30,
     max_pages: Optional[int] = 1
 ) -> Dict[str, Any]:
     """
@@ -189,7 +202,7 @@ async def get_pull_requests(
         repo_slug: Repository slug
         workspace: Workspace name (optional, defaults to configured workspace)
         state: Pull request state (OPEN, MERGED, DECLINED, SUPERSEDED) (default: OPEN)
-        limit: Maximum number of pull requests per page (default: 30)
+        page_size: Items per page (default: 30)
         max_pages: Maximum pages to fetch (default: 1, max recommended: 10)
 
     Returns:
@@ -199,7 +212,8 @@ async def get_pull_requests(
         Fetching more than 10 pages or 300 items will trigger a warning.
     """
     client = get_client()
-    return await client.get_pull_requests(repo_slug, workspace, state, limit, max_pages)
+    result = await client.get_pull_requests(repo_slug, workspace, state, page_size, max_pages)
+    return slim_pull_request_list(result)
 
 
 @conditional_tool()
@@ -232,7 +246,7 @@ async def get_pull_request(
     )
     pr_data["comment_stats"] = comment_stats
 
-    return pr_data
+    return slim_pull_request(pr_data)
 
 
 @conditional_tool()
@@ -263,10 +277,11 @@ async def create_pull_request(
         Created pull request details
     """
     client = get_client()
-    return await client.create_pull_request(
+    result = await client.create_pull_request(
         repo_slug, title, description, source_branch, target_branch,
         workspace, reviewers, draft
     )
+    return slim_pull_request_created(result)
 
 
 @conditional_tool()
@@ -291,9 +306,10 @@ async def update_pull_request(
         Updated pull request details
     """
     client = get_client()
-    return await client.update_pull_request(
+    result = await client.update_pull_request(
         repo_slug, pull_request_id, workspace, title, description
     )
+    return slim_pull_request_created(result)
 
 
 @conditional_tool()
@@ -359,9 +375,10 @@ async def decline_pull_request(
         Updated pull request details
     """
     client = get_client()
-    return await client.decline_pull_request(
+    result = await client.decline_pull_request(
         repo_slug, pull_request_id, workspace, message
     )
+    return slim_pull_request_created(result)
 
 
 @conditional_tool()
@@ -386,9 +403,10 @@ async def merge_pull_request(
         Merged pull request details
     """
     client = get_client()
-    return await client.merge_pull_request(
+    result = await client.merge_pull_request(
         repo_slug, pull_request_id, workspace, message, strategy
     )
+    return slim_pull_request_created(result)
 
 
 # ========== Pull Request Comment Tools ==========
@@ -453,7 +471,7 @@ async def get_pull_request_comments(
     if "values" in result:
         result["values"] = [_enrich_comment_with_resolution(comment) for comment in result["values"]]
 
-    return result
+    return slim_comment_list(result)
 
 
 @conditional_tool()
@@ -484,10 +502,11 @@ async def add_pull_request_comment(
         Created comment details
     """
     client = get_client()
-    return await client.add_pull_request_comment(
+    result = await client.add_pull_request_comment(
         repo_slug, pull_request_id, content, workspace,
         inline_path, inline_from, inline_to, pending
     )
+    return slim_comment(_enrich_comment_with_resolution(result))
 
 
 @conditional_tool()
@@ -545,10 +564,10 @@ async def get_pull_request_activity(
 
     if "values" in result:
         for activity in result["values"]:
-            if activity.get("type") == "comment" and "comment" in activity:
+            if "comment" in activity:
                 activity["comment"] = _enrich_comment_with_resolution(activity["comment"])
 
-    return result
+    return slim_activity_list(result)
 
 
 @conditional_tool()
@@ -576,9 +595,10 @@ async def get_pull_request_commits(
         Fetching more than 10 pages or 300 items will trigger a warning.
     """
     client = get_client()
-    return await client.get_pull_request_commits(
+    result = await client.get_pull_request_commits(
         repo_slug, pull_request_id, workspace, page_size, max_pages
     )
+    return slim_commit_list(result)
 
 
 @conditional_tool()
@@ -612,9 +632,10 @@ async def get_pull_request_statuses(
         Fetching more than 10 pages or 300 items will trigger a warning.
     """
     client = get_client()
-    return await client.get_pull_request_statuses(
+    result = await client.get_pull_request_statuses(
         repo_slug, pull_request_id, workspace, page_size, max_pages
     )
+    return slim_status_list(result)
 
 
 @conditional_tool()
@@ -647,9 +668,10 @@ async def get_pull_request_diffstat(
         Fetching more than 10 pages or 300 items will trigger a warning.
     """
     client = get_client()
-    return await client.get_pull_request_diffstat(
+    result = await client.get_pull_request_diffstat(
         repo_slug, pull_request_id, workspace, page_size, max_pages
     )
+    return slim_diffstat_list(result)
 
 
 # ========== Pipeline Tools ==========
@@ -660,7 +682,7 @@ async def list_pipeline_runs(
     workspace: Optional[str] = None,
     status: Optional[str] = None,
     target_branch: Optional[str] = None,
-    limit: int = 30,
+    page_size: int = 30,
     max_pages: Optional[int] = 1
 ) -> Dict[str, Any]:
     """
@@ -671,7 +693,7 @@ async def list_pipeline_runs(
         workspace: Workspace name (optional, defaults to configured workspace)
         status: Filter pipelines by status (PENDING, IN_PROGRESS, SUCCESSFUL, FAILED, ERROR, STOPPED)
         target_branch: Filter pipelines by target branch
-        limit: Maximum number of pipelines per page (default: 30)
+        page_size: Items per page (default: 30)
         max_pages: Maximum pages to fetch (default: 1, max recommended: 10)
 
     Returns:
@@ -681,9 +703,10 @@ async def list_pipeline_runs(
         Fetching more than 10 pages or 300 items will trigger a warning.
     """
     client = get_client()
-    return await client.list_pipeline_runs(
-        repo_slug, workspace, status, target_branch, limit, max_pages
+    result = await client.list_pipeline_runs(
+        repo_slug, workspace, status, target_branch, page_size, max_pages
     )
+    return slim_pipeline_run_list(result)
 
 
 @conditional_tool()
@@ -704,7 +727,8 @@ async def get_pipeline_run(
         Pipeline run details
     """
     client = get_client()
-    return await client.get_pipeline_run(repo_slug, pipeline_uuid, workspace)
+    result = await client.get_pipeline_run(repo_slug, pipeline_uuid, workspace)
+    return slim_pipeline_run(result)
 
 
 @conditional_tool()
@@ -732,9 +756,10 @@ async def get_pipeline_steps(
         Fetching more than 10 pages or 300 items will trigger a warning.
     """
     client = get_client()
-    return await client.get_pipeline_steps(
+    result = await client.get_pipeline_steps(
         repo_slug, pipeline_uuid, workspace, page_size, max_pages
     )
+    return slim_pipeline_step_list(result)
 
 
 @conditional_tool()
