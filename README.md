@@ -15,10 +15,8 @@ A Model Context Protocol (MCP) server for Bitbucket API, optimized for container
 ### 1. Configure Credentials
 
 ```bash
-# Add to ~/.zshrc or ~/.bashrc
-export BITBUCKET_USERNAME="your-email@example.com"
-export BITBUCKET_TOKEN="your-api-token"
-export BITBUCKET_WORKSPACE="your-workspace"
+cp .env.example .env
+# Edit .env with your credentials
 ```
 
 > Get your API token at: https://id.atlassian.com/manage-profile/security/api-tokens

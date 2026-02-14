@@ -16,6 +16,7 @@
 ### Changed
 
 - Sync `__version__` in `src/__init__.py` to match `pyproject.toml` (1.4.0)
+- README: recommend `.env` file instead of shell exports for credentials
 
 ### Security
 
