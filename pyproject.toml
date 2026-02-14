@@ -1,6 +1,6 @@
 [project]
 name = "bitbucket-mcp-py"
-version = "1.4.0"
+version = "1.4.1"
 description = "MCP Server for Bitbucket API - Container optimized with configurable tools, structured output and slim responses"
 license = "MIT"
 readme = "README.md"

@@ -4,7 +4,7 @@
 
 **Name**: bitbucket-mcp-py
 **Type**: MCP (Model Context Protocol) Server for Bitbucket API
-**Version**: 1.4.0
+**Version**: 1.4.1
 **Python**: 3.12+
 **Container Runtime**: Podman (preferred) or Docker
 
@@ -44,16 +44,15 @@ configs/
 
 tests/                   # pytest test suite
 scripts/                 # Shell scripts (build.sh, run.sh)
+server.json              # MCP Registry server manifest
 ```
 
 ## Credentials Configuration
 
-**Option 1: Environment Variables (Recommended)**
+**Option 1: `.env` File (Recommended)**
 ```bash
-# Add to ~/.zshrc or ~/.bashrc
-export BITBUCKET_USERNAME="email@example.com"
-export BITBUCKET_TOKEN="your-api-token"
-export BITBUCKET_WORKSPACE="your-workspace"
+cp .env.example .env
+# Edit .env with your credentials
 ```
 
 **Option 2: System Keychain (More Secure)**
@@ -67,9 +66,9 @@ security add-generic-password -s "bitbucket-mcp" -a "bitbucket_token" -w "token"
 security add-generic-password -s "bitbucket-mcp" -a "bitbucket_workspace" -w "workspace"
 ```
 
-**Fallback Chain**: Environment variables → System keychain
+**Fallback Chain**: `.env` file → System keychain
 
-> **Security**: Avoid `.env` files for credentials (risk of accidental commit). Use shell env vars or keychain.
+> **Security**: `.env` is in `.gitignore`. Never commit credentials.
 
 ## Architecture
 
@@ -181,9 +180,37 @@ RUNTIME := $(shell command -v podman 2>/dev/null || command -v docker 2>/dev/nul
 | `Makefile` | Container management (podman/docker) |
 | `.github/workflows/ci.yml` | GitHub Actions CI pipeline |
 | `.env.example` | Template for credentials (copy to .env) |
+| `server.json` | MCP Registry manifest (for `mcp-publisher`) |
+
+## Publishing
+
+### PyPI
+```bash
+python -m build
+python -m twine upload dist/* -u __token__ -p <PYPI_TOKEN>
+```
+- Package: https://pypi.org/project/bitbucket-mcp-py/
+- Install: `pip install bitbucket-mcp-py`
+
+### MCP Registry
+```bash
+brew install mcp-publisher
+mcp-publisher login github    # GitHub OAuth (device flow)
+mcp-publisher publish         # Reads server.json
+```
+- Registry: https://registry.modelcontextprotocol.io/
+- Server name: `io.github.lawp09/bitbucket-mcp`
+- **Important**: README must contain `<!-- mcp-name: io.github.lawp09/bitbucket-mcp -->` for PyPI ownership validation
+
+### Version Bump Checklist
+1. `pyproject.toml` → `version`
+2. `src/__init__.py` → `__version__`
+3. `server.json` → `version` + `packages[0].version`
+4. `CHANGELOG.md` → new entry
 
 ## Recent Changes
 
+- Published to PyPI and MCP Registry
 - Added GitHub Actions CI workflow (pytest + coverage + build)
 - Added slim response transformers to reduce LLM token usage (`src/utils/transformers.py`)
 - Configured hatch wheel build for `src/` layout

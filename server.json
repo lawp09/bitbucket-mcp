@@ -1,0 +1,21 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.lawp09/bitbucket-mcp",
+  "title": "Bitbucket MCP Server",
+  "description": "MCP server for Bitbucket API - manage repositories, pull requests, comments, pipelines and more",
+  "repository": {
+    "url": "https://github.com/lawp09/bitbucket-mcp",
+    "source": "github"
+  },
+  "version": "1.4.1",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "bitbucket-mcp-py",
+      "version": "1.4.1",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}

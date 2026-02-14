@@ -1,6 +1,18 @@
 # Bitbucket MCP Server (Python)
 
+<!-- mcp-name: io.github.lawp09/bitbucket-mcp -->
+
+[![PyPI](https://img.shields.io/pypi/v/bitbucket-mcp-py)](https://pypi.org/project/bitbucket-mcp-py/)
+[![Python](https://img.shields.io/pypi/pyversions/bitbucket-mcp-py)](https://pypi.org/project/bitbucket-mcp-py/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 A Model Context Protocol (MCP) server for Bitbucket API, optimized for container execution.
+
+## Install
+
+```bash
+pip install bitbucket-mcp-py
+```
 
 ## Features
 
@@ -115,6 +127,8 @@ MIT
 
 ## References
 
+- [MCP Registry](https://registry.modelcontextprotocol.io/) - Official MCP server registry
+- [PyPI Package](https://pypi.org/project/bitbucket-mcp-py/) - Python package
 - [MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk)
 - [Bitbucket API 2.0](https://developer.atlassian.com/cloud/bitbucket/rest/api-group-pullrequests/)
 - [FastMCP Framework](https://gofastmcp.com/)

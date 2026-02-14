@@ -12,11 +12,15 @@
 - PyPI metadata: license, authors, keywords, classifiers, project URLs
 - GitHub topics and repository description
 - Published to PyPI (`pip install bitbucket-mcp-py`)
+- Published to [MCP Registry](https://registry.modelcontextprotocol.io/) (`io.github.lawp09/bitbucket-mcp`)
+- `server.json` manifest for MCP Registry publishing
+- PyPI badges and install section in README
 
 ### Changed
 
-- Sync `__version__` in `src/__init__.py` to match `pyproject.toml` (1.4.0)
+- Version bump to 1.4.1 for MCP Registry publication
 - README: recommend `.env` file instead of shell exports for credentials
+- CLAUDE.md: add publishing workflow, version bump checklist
 
 ### Security
 
