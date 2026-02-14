@@ -11,6 +11,11 @@
 - CODE_OF_CONDUCT.md (Contributor Covenant v2.1)
 - PyPI metadata: license, authors, keywords, classifiers, project URLs
 - GitHub topics and repository description
+- Published to PyPI (`pip install bitbucket-mcp-py`)
+
+### Changed
+
+- Sync `__version__` in `src/__init__.py` to match `pyproject.toml` (1.4.0)
 
 ### Security
 
