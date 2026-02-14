@@ -5,6 +5,11 @@
 ### Added
 
 - GitHub Actions CI workflow (tests + build on push/PR to main)
+- MIT LICENSE file
+- CONTRIBUTING.md with dev setup and PR guidelines
+- CODE_OF_CONDUCT.md (Contributor Covenant v2.1)
+- PyPI metadata: license, authors, keywords, classifiers, project URLs
+- GitHub topics and repository description
 
 ---
 
