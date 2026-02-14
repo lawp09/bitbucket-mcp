@@ -12,6 +12,12 @@
 - PyPI metadata: license, authors, keywords, classifiers, project URLs
 - GitHub topics and repository description
 
+### Security
+
+- Remove `email` and `token` attributes from `BitbucketClient` after auth header construction
+- Add protected `__repr__` on `BitbucketClient` to prevent credential leaks in logs
+- Use `get_credentials()` in `main.py` startup validation (enables keychain fallback)
+
 ---
 
 ## [1.4.0] - 2026-02-10

@@ -35,8 +35,6 @@ def test_get_client_with_env_vars():
         client = get_client()
 
         assert client is not None
-        assert client.email == "test@example.com"
-        assert client.token == "test_token"
         assert client.workspace == "test_workspace"
 
 
