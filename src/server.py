@@ -483,7 +483,8 @@ async def add_pull_request_comment(
     inline_path: Optional[str] = None,
     inline_from: Optional[int] = None,
     inline_to: Optional[int] = None,
-    pending: bool = False
+    pending: bool = False,
+    parent_id: Optional[int] = None
 ) -> Dict[str, Any]:
     """
     Add a comment to a pull request (general or inline).
@@ -497,6 +498,7 @@ async def add_pull_request_comment(
         inline_from: Line number in the old version of the file (for deleted or modified lines)
         inline_to: Line number in the new version of the file (for added or modified lines)
         pending: Whether to create this comment as a pending comment (draft state) (default: False)
+        parent_id: ID of the comment to reply to (creates a threaded reply)
 
     Returns:
         Created comment details
@@ -504,7 +506,7 @@ async def add_pull_request_comment(
     client = get_client()
     result = await client.add_pull_request_comment(
         repo_slug, pull_request_id, content, workspace,
-        inline_path, inline_from, inline_to, pending
+        inline_path, inline_from, inline_to, pending, parent_id=parent_id
     )
     return slim_comment(_enrich_comment_with_resolution(result))
 

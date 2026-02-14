@@ -422,7 +422,8 @@ class BitbucketClient:
         inline_path: Optional[str] = None,
         inline_from: Optional[int] = None,
         inline_to: Optional[int] = None,
-        pending: bool = False
+        pending: bool = False,
+        parent_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Add a comment to a pull request.
@@ -436,6 +437,7 @@ class BitbucketClient:
             inline_from: Line number in old version (for deleted/modified lines)
             inline_to: Line number in new version (for added/modified lines)
             pending: Whether to create as pending comment (draft)
+            parent_id: Comment ID to reply to (creates a threaded reply)
 
         Returns:
             Created comment details
@@ -456,6 +458,9 @@ class BitbucketClient:
 
         if pending:
             payload["pending"] = True
+
+        if parent_id is not None:
+            payload["parent"] = {"id": parent_id}
 
         response = await self.client.post(
             f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}/comments",

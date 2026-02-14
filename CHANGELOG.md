@@ -4,6 +4,7 @@
 
 ### Added
 
+- Threaded reply support for PR comments via `parent_id` parameter on `add_pull_request_comment`
 - GitHub Actions CI workflow (tests + build on push/PR to main)
 - MIT LICENSE file
 - CONTRIBUTING.md with dev setup and PR guidelines
