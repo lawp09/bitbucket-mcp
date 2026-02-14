@@ -17,8 +17,6 @@ def test_client_initialization():
     expected_auth = base64.b64encode(f"{email}:{token}".encode()).decode()
     expected_header = f"Basic {expected_auth}"
 
-    assert client.email == email
-    assert client.token == token
     assert client.workspace == workspace
     assert client.client.headers["Authorization"] == expected_header
     assert client.client.headers["Content-Type"] == "application/json"

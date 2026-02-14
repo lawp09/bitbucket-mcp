@@ -56,20 +56,12 @@ Environment variables required:
 
     args = parser.parse_args()
 
-    # Validate environment variables
-    import os
-    required_vars = ["BITBUCKET_USERNAME", "BITBUCKET_TOKEN", "BITBUCKET_WORKSPACE"]
-    missing_vars = [var for var in required_vars if not os.getenv(var)]
-
-    if missing_vars:
-        print(
-            f"Error: Missing required environment variables: {', '.join(missing_vars)}",
-            file=sys.stderr
-        )
-        print("\nPlease set the following environment variables:", file=sys.stderr)
-        print("  export BITBUCKET_USERNAME='your-email@example.com'", file=sys.stderr)
-        print("  export BITBUCKET_TOKEN='your-192-char-token'", file=sys.stderr)
-        print("  export BITBUCKET_WORKSPACE='your-workspace'", file=sys.stderr)
+    # Validate credentials (env vars → keychain fallback)
+    from .utils.credentials import get_credentials
+    try:
+        get_credentials()
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
     try:

@@ -22,8 +22,6 @@ class BitbucketClient:
             token: Bitbucket API token
             workspace: Bitbucket workspace name
         """
-        self.email = email
-        self.token = token
         self.workspace = workspace
         self.base_url = "https://api.bitbucket.org/2.0"
 
@@ -48,6 +46,10 @@ class BitbucketClient:
     async def close(self):
         """Close the HTTP client"""
         await self.client.aclose()
+
+    def __repr__(self) -> str:
+        """Protected repr to avoid credential leaks in logs/debug."""
+        return f"BitbucketClient(workspace={self.workspace!r})"
 
     async def __aenter__(self):
         return self
