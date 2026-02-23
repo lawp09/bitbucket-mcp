@@ -1,6 +1,6 @@
 [project]
 name = "bitbucket-mcp-py"
-version = "1.4.1"
+version = "1.5.0"
 description = "MCP Server for Bitbucket API - Container optimized with configurable tools, structured output and slim responses"
 license = "MIT"
 readme = "README.md"
@@ -8,7 +8,7 @@ requires-python = ">=3.12"
 authors = [
     { name = "Philippe Lawson" },
 ]
-keywords = ["mcp", "bitbucket", "api", "model-context-protocol", "mcp-server"]
+keywords = ["mcp", "bitbucket", "api", "model-context-protocol", "mcp-server", "claude-code", "cursor", "github-copilot", "pull-request", "code-review", "bitbucket-cloud", "pipelines", "llm", "ai-assistant"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -25,10 +25,13 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/lawp09/bitbucket-mcp"
-Repository = "https://github.com/lawp09/bitbucket-mcp"
-Issues = "https://github.com/lawp09/bitbucket-mcp/issues"
-Changelog = "https://github.com/lawp09/bitbucket-mcp/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/lawp09/bitbucket-mcp-py"
+Repository = "https://github.com/lawp09/bitbucket-mcp-py"
+Issues = "https://github.com/lawp09/bitbucket-mcp-py/issues"
+Changelog = "https://github.com/lawp09/bitbucket-mcp-py/blob/main/CHANGELOG.md"
+
+[project.scripts]
+bitbucket-mcp = "src.main:main"
 
 [project.optional-dependencies]
 dev = [
