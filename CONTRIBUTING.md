@@ -51,6 +51,46 @@ Open an issue on GitHub with:
 - Expected vs actual behavior
 - Python version and OS
 
+## Releasing (maintainers only)
+
+Releases are automated via GitHub Actions. The pipeline triggers on git tags and handles build, PyPI publish, and GitHub Release creation automatically.
+
+### Prerequisites (one-time setup)
+
+- **PyPI Trusted Publisher** configured at `pypi.org/manage/project/bitbucket-mcp-py/settings/publishing/`
+  - Repository: `lawp09/bitbucket-mcp`, Workflow: `release.yml`, Environment: `release`
+- **GitHub environment** named `release` created in repository Settings → Environments
+
+### Release process
+
+1. **Update `CHANGELOG.md`** — add a new `## [X.Y.Z] - YYYY-MM-DD` section with the changes
+
+2. **Update `server.json`** — bump `version` and `packages[0].version` to `X.Y.Z`
+
+3. **Open a PR** with these two changes, get it merged into `main`
+
+4. **Tag and push**
+   ```bash
+   git checkout main && git pull
+   git tag vX.Y.Z
+   git push origin vX.Y.Z
+   ```
+
+5. **GitHub Actions takes over** — the `release.yml` pipeline runs automatically:
+   - Runs tests
+   - Builds the package (`hatch-vcs` derives version from the tag)
+   - Verifies the tag matches the package version and `server.json`
+   - Publishes to PyPI via OIDC (no token required)
+   - Creates a GitHub Release with the CHANGELOG notes
+
+### Versioning
+
+This project uses [hatch-vcs](https://github.com/ofek/hatch-vcs) — the package version is derived from git tags at build time. There is no `version` field to update in `pyproject.toml` or `src/__init__.py`.
+
+Version format follows [Semantic Versioning](https://semver.org/):
+- `MAJOR.MINOR.PATCH` on a tagged commit (e.g. `v1.6.0` → `1.6.0`)
+- `MAJOR.MINOR.PATCH.devN+gHASH` on untagged commits (development builds)
+
 ## License
 
 By contributing, you agree that your contributions will be licensed under the MIT License.
