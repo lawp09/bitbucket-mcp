@@ -42,7 +42,7 @@
         "description": "Decline a pull request"
       },
       "merge_pull_request": {
-        "enabled": false,
+        "enabled": true,
         "description": "Merge a pull request"
       },
       "get_pull_request_comments": {

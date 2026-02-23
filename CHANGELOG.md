@@ -1,5 +1,25 @@
 # Changelog - Bitbucket MCP Server Python
 
+## [1.5.0] - 2026-02-23
+
+### Added
+- uvx support via `[project.scripts]` entry point (`bitbucket-mcp` command)
+- `merge_pull_request` tool enabled in default configuration
+- Cursor configuration section in README
+- Three installation modes documented (uvx, pip, local dev)
+- `uv.lock` for reproducible installs
+
+### Changed
+- README rewritten with uvx as primary install method
+- All references to Claude Desktop replaced with Claude Code
+- Tool count corrected to 21 in README
+
+### Fixed
+- PyPI project URLs corrected (bitbucket-mcp → bitbucket-mcp-py)
+- PyPI keywords enriched (claude-code, cursor, github-copilot, etc.)
+
+---
+
 ## [Unreleased]
 
 ### Added
