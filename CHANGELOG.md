@@ -1,5 +1,22 @@
 # Changelog - Bitbucket MCP Server Python
 
+## [1.6.0] - 2026-02-23
+
+### Added
+- Automated PyPI release pipeline via GitHub Actions (triggered on git tags `v*`)
+- PyPI Trusted Publisher (OIDC) — no API token stored in GitHub
+- GitHub Release auto-created with CHANGELOG notes on each tag
+
+### Changed
+- Version now derived from git tags via `hatch-vcs` (no more manual version bump in code)
+- `CLAUDE.md` version bump checklist updated (2 files instead of 4)
+
+### Fixed
+- `__version__` fallback chain: `importlib.metadata` → `_version.py` → `0.0.0-dev`
+- Dockerfile: `SETUPTOOLS_SCM_PRETEND_VERSION` ARG for hatch-vcs compatibility
+
+---
+
 ## [1.5.0] - 2026-02-23
 
 ### Added
