@@ -754,6 +754,44 @@ class BitbucketClient:
             config
         )
 
+    # ========== Commit Build Statuses ==========
+
+    async def get_commit_statuses(
+        self,
+        repo_slug: str,
+        commit_hash: str,
+        workspace: Optional[str] = None,
+        page_size: int = 10,
+        max_pages: Optional[int] = 1
+    ) -> Dict[str, Any]:
+        """
+        Get build/CI statuses for a specific commit with pagination support.
+
+        Args:
+            repo_slug: Repository slug
+            commit_hash: Commit hash (full or short)
+            workspace: Workspace name (defaults to self.workspace)
+            page_size: Items per page (default: 10)
+            max_pages: Maximum pages to fetch (default: 1)
+
+        Returns:
+            Build statuses with aggregated values
+            Each status contains:
+            - state: SUCCESSFUL, FAILED, INPROGRESS, STOPPED
+            - key: Unique identifier for the build
+            - name: Build name/description
+            - url: Link to the build details
+            - created_on: Timestamp of the status
+        """
+        ws = workspace or self.workspace
+        config = PaginationConfig(page_size=page_size, max_pages=max_pages)
+        return await aggregate_pages(
+            self.client,
+            f"/repositories/{ws}/{repo_slug}/commit/{commit_hash}/statuses",
+            {},
+            config
+        )
+
     async def get_pull_request_diffstat(
         self,
         repo_slug: str,

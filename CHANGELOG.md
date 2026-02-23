@@ -1,5 +1,15 @@
 # Changelog - Bitbucket MCP Server Python
 
+## [1.7.0] - 2026-02-23
+
+### Added
+- New MCP tool `get_commit_statuses` — get Jenkins/CI build statuses for any branch commit without creating a PR
+- Uses Bitbucket API v2 endpoint `GET /repositories/{workspace}/{repo}/commit/{hash}/statuses`
+- Supports pagination (`page_size`, `max_pages`)
+- Slim response via existing `slim_status_list` transformer (removes noise, reduces LLM token usage)
+
+---
+
 ## [1.6.0] - 2026-02-23
 
 ### Added
