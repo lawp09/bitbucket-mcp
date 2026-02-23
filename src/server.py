@@ -641,6 +641,49 @@ async def get_pull_request_statuses(
 
 
 @conditional_tool()
+async def get_commit_statuses(
+    repo_slug: str,
+    commit_hash: str,
+    workspace: Optional[str] = None,
+    page_size: int = 10,
+    max_pages: Optional[int] = 1
+) -> Dict[str, Any]:
+    """
+    Get build/CI statuses for a specific commit (e.g. Jenkins, CI/CD).
+
+    Use this to check the Jenkins build status for any branch commit
+    without needing to create a Pull Request first.
+
+    Args:
+        repo_slug: Repository slug
+        commit_hash: Commit hash (full or short, e.g. "abc1234")
+        workspace: Workspace name (optional, defaults to configured workspace)
+        page_size: Items per page (default: 10, max recommended: 100)
+        max_pages: Maximum pages to fetch (default: 1, max recommended: 10)
+
+    Returns:
+        List of build statuses (Jenkins, CI/CD, tests, etc.)
+        Each status contains:
+        - state: SUCCESSFUL, FAILED, INPROGRESS, STOPPED
+        - key: Unique identifier for the build
+        - name: Build name/description
+        - description: Build result description
+        - url: Link to the Jenkins build details
+        - created_on: Timestamp of the status
+        - updated_on: Timestamp of last update
+
+    Note:
+        Requires Jenkins Bitbucket Build Status Notifier plugin to post statuses.
+        Fetching more than 10 pages or 300 items will trigger a warning.
+    """
+    client = get_client()
+    result = await client.get_commit_statuses(
+        repo_slug, commit_hash, workspace, page_size, max_pages
+    )
+    return slim_status_list(result)
+
+
+@conditional_tool()
 async def get_pull_request_diffstat(
     repo_slug: str,
     pull_request_id: str,

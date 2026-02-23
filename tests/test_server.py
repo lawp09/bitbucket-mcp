@@ -77,6 +77,7 @@ async def test_mcp_server_tools_registered():
     # merge_pull_request is disabled by default in configs/tools.json
     assert "get_pull_request_statuses" in tool_names
     assert "get_pull_request_diffstat" in tool_names
+    assert "get_commit_statuses" in tool_names
 
 
 @pytest.mark.asyncio

@@ -78,7 +78,9 @@ def test_new_methods_exist():
     # Check that the new methods exist
     assert hasattr(client, "get_pull_request_statuses")
     assert hasattr(client, "get_pull_request_diffstat")
+    assert hasattr(client, "get_commit_statuses")
 
     # Check they are callable
     assert callable(getattr(client, "get_pull_request_statuses"))
     assert callable(getattr(client, "get_pull_request_diffstat"))
+    assert callable(getattr(client, "get_commit_statuses"))

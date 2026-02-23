@@ -74,6 +74,12 @@
         "description": "Get file modification statistics for a pull request"
       }
     },
+    "commits": {
+      "get_commit_statuses": {
+        "enabled": true,
+        "description": "Get build/CI statuses for a specific commit (Jenkins, CI/CD)"
+      }
+    },
     "pipelines": {
       "list_pipeline_runs": {
         "enabled": true,
