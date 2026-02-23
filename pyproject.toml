@@ -1,6 +1,6 @@
 [project]
 name = "bitbucket-mcp-py"
-version = "1.5.0"
+dynamic = ["version"]
 description = "MCP Server for Bitbucket API - Container optimized with configurable tools, structured output and slim responses"
 license = "MIT"
 readme = "README.md"
@@ -46,8 +46,14 @@ keyring = [
 ]
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "src/_version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
