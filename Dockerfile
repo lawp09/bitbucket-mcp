@@ -1,5 +1,9 @@
 FROM python:3.12-slim
 
+# Allows hatch-vcs to determine version without .git history
+ARG PACKAGE_VERSION=dev
+ENV SETUPTOOLS_SCM_PRETEND_VERSION=${PACKAGE_VERSION}
+
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
