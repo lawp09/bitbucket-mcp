@@ -203,10 +203,11 @@ mcp-publisher publish         # Reads server.json
 - **Important**: README must contain `<!-- mcp-name: io.github.lawp09/bitbucket-mcp -->` for PyPI ownership validation
 
 ### Version Bump Checklist
-1. `pyproject.toml` → `version`
-2. `src/__init__.py` → `__version__`
-3. `server.json` → `version` + `packages[0].version`
-4. `CHANGELOG.md` → new entry
+> Version is now derived from git tags via `hatch-vcs`. Only 2 files to update manually:
+1. `server.json` → `version` + `packages[0].version`
+2. `CHANGELOG.md` → new entry under `## [X.Y.Z] - YYYY-MM-DD`
+
+Then: `git tag vX.Y.Z && git push origin vX.Y.Z` → GitHub Actions handles the rest.
 
 ## Recent Changes
 
