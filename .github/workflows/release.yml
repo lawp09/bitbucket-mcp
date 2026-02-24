@@ -105,14 +105,13 @@ jobs:
 
       - name: Install mcp-publisher
         run: |
-          curl -sSL https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher-linux-amd64 -o /usr/local/bin/mcp-publisher
-          chmod +x /usr/local/bin/mcp-publisher
+          curl -sSL https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz | tar -xz -C /usr/local/bin mcp-publisher
 
       - name: Publish to MCP Registry
         env:
           MCP_REGISTRY_TOKEN: ${{ secrets.MCP_GITHUB_TOKEN }}
         run: |
-          echo "$MCP_REGISTRY_TOKEN" > ~/.mcpregistry_github_token
+          echo "$MCP_REGISTRY_TOKEN" > .mcpregistry_github_token
           mcp-publisher publish server.json
 
   github-release:
