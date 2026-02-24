@@ -97,8 +97,26 @@ jobs:
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
 
-  github-release:
+  publish-mcp-registry:
     needs: publish-pypi
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install mcp-publisher
+        run: |
+          curl -sSL https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher-linux-amd64 -o /usr/local/bin/mcp-publisher
+          chmod +x /usr/local/bin/mcp-publisher
+
+      - name: Publish to MCP Registry
+        env:
+          MCP_REGISTRY_TOKEN: ${{ secrets.MCP_GITHUB_TOKEN }}
+        run: |
+          echo "$MCP_REGISTRY_TOKEN" > ~/.mcpregistry_github_token
+          mcp-publisher publish server.json
+
+  github-release:
+    needs: [publish-pypi, publish-mcp-registry]
     runs-on: ubuntu-latest
     permissions:
       contents: write

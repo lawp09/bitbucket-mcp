@@ -1,5 +1,17 @@
 # Changelog - Bitbucket MCP Server Python
 
+## [1.8.1] - 2026-02-24
+
+### Added
+- Automated MCP Registry publish in release pipeline (job `publish-mcp-registry` in `release.yml`)
+- New `/release` skill for Claude Code to orchestrate the complete release workflow
+
+### Changed
+- GitHub Actions release workflow now publishes to both PyPI and MCP Registry on git tag push
+- `github-release` job waits for both `publish-pypi` and `publish-mcp-registry` to succeed
+
+---
+
 ## [1.8.0] - 2026-02-24
 
 ### Added
