@@ -6,11 +6,11 @@
 [![Python](https://img.shields.io/pypi/pyversions/bitbucket-mcp-py)](https://pypi.org/project/bitbucket-mcp-py/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Connect **Claude Code**, **Cursor**, **VS Code (GitHub Copilot)**, and any MCP-compatible AI assistant to your Bitbucket Cloud repositories. Review pull requests, monitor pipelines, and manage your code — all through natural language.
+Connect **Claude Code**, **VS Code (GitHub Copilot)**, **Cursor**, and any MCP-compatible AI assistant to your Bitbucket Cloud repositories. Review pull requests, monitor pipelines, and manage your code — all through natural language.
 
 ## Features
 
-- **21 MCP tools** — repositories, pull requests, comments, diffs, pipelines
+- **24 MCP tools** — repositories, pull requests, comments, diffs, pipelines, build statuses
 - **Slim responses** — stripped API noise for lower LLM token usage
 - **Configurable** — enable/disable tools via `configs/tools.json`
 - **Secure credentials** — environment variables or system keychain
@@ -19,21 +19,28 @@ Connect **Claude Code**, **Cursor**, **VS Code (GitHub Copilot)**, and any MCP-c
 
 ### 1. Install
 
-```bash
-# Avec uv (recommandé)
-uvx bitbucket-mcp-py
+The recommended way to run the server is via **uvx** (zero install, isolated environment):
 
-# Avec pip
-pip install bitbucket-mcp-py
+```bash
+# Always latest version
+uvx --from bitbucket-mcp-py bitbucket-mcp
+
+# Pin a specific version
+uvx --from bitbucket-mcp-py==1.8.0 bitbucket-mcp
 ```
 
-## Installation modes
+> **Why `--from`?** The PyPI package is `bitbucket-mcp-py` but the command entry point is `bitbucket-mcp`. The `--from` flag tells uvx which package to install.
 
-| Mode | Command | Pour qui |
+<details>
+<summary>Alternative install methods</summary>
+
+| Mode | Command | Best for |
 |------|---------|----------|
-| **uvx** (recommended) | `uvx bitbucket-mcp-py` | Zero install, works anywhere with uv |
-| **pip global** | `pip install bitbucket-mcp-py` | Simple, global dependencies |
+| **pip global** | `pip install bitbucket-mcp-py` | Simple, persistent install |
 | **Local dev** | `pip install -e .` in project dir | Contributing to the project |
+| **Docker** | See [Docker section](#docker-alternative) | Container-based workflows |
+
+</details>
 
 ### 2. Configure credentials
 
@@ -49,14 +56,48 @@ Set the following environment variables (or use a `.env` file — see [Credentia
 
 ### 3. Configure your AI assistant
 
-#### Claude Code
+#### Claude Code (recommended)
+
+**Option A — CLI (fastest):**
+
+```bash
+claude mcp add bitbucket-mcp \
+  -e BITBUCKET_USERNAME=your-email@example.com \
+  -e BITBUCKET_TOKEN=your-api-token \
+  -e BITBUCKET_WORKSPACE=your-workspace \
+  -- uvx --from bitbucket-mcp-py bitbucket-mcp
+```
+
+**Option B — JSON config** (`~/.claude.json` or project `.mcp.json`):
 
 ```json
 {
   "mcpServers": {
-    "bitbucket": {
+    "bitbucket-mcp": {
+      "type": "stdio",
       "command": "uvx",
-      "args": ["bitbucket-mcp-py"],
+      "args": ["--from", "bitbucket-mcp-py", "bitbucket-mcp"],
+      "env": {
+        "BITBUCKET_USERNAME": "your-email@example.com",
+        "BITBUCKET_TOKEN": "your-api-token",
+        "BITBUCKET_WORKSPACE": "your-workspace"
+      }
+    }
+  }
+}
+```
+
+#### VS Code (GitHub Copilot)
+
+Add to `.vscode/mcp.json` (workspace) or `~/Library/Application Support/Code/User/mcp.json` (global, macOS):
+
+```json
+{
+  "servers": {
+    "bitbucket-mcp": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["--from", "bitbucket-mcp-py", "bitbucket-mcp"],
       "env": {
         "BITBUCKET_USERNAME": "your-email@example.com",
         "BITBUCKET_TOKEN": "your-api-token",
@@ -74,29 +115,9 @@ Add to `~/.cursor/mcp.json`:
 ```json
 {
   "mcpServers": {
-    "bitbucket": {
+    "bitbucket-mcp": {
       "command": "uvx",
-      "args": ["bitbucket-mcp-py"],
-      "env": {
-        "BITBUCKET_USERNAME": "your-email@example.com",
-        "BITBUCKET_TOKEN": "your-api-token",
-        "BITBUCKET_WORKSPACE": "your-workspace"
-      }
-    }
-  }
-}
-```
-
-#### VS Code (GitHub Copilot)
-
-Add to `~/Library/Application Support/Code/User/mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "bitbucket": {
-      "command": "uvx",
-      "args": ["bitbucket-mcp-py"],
+      "args": ["--from", "bitbucket-mcp-py", "bitbucket-mcp"],
       "env": {
         "BITBUCKET_USERNAME": "your-email@example.com",
         "BITBUCKET_TOKEN": "your-api-token",
@@ -112,9 +133,10 @@ Add to `~/Library/Application Support/Code/User/mcp.json`:
 | Category | Tools |
 |----------|-------|
 | **Repositories** | `list_repositories`, `get_repository` |
-| **Pull Requests** | `get_pull_requests`, `get_pull_request`, `create_pull_request`, `update_pull_request`, `approve_pull_request`, `unapprove_pull_request`, `decline_pull_request`, `merge_pull_request` |
-| **Comments** | `get_pull_request_comments`, `add_pull_request_comment`, `get_pull_request_activity`, `get_pull_request_diff`, `get_pull_request_commits` |
-| **Build Status** | `get_pull_request_statuses`, `get_pull_request_diffstat` |
+| **Pull Requests** | `get_pull_requests`, `get_pull_request`, `create_pull_request`, `update_pull_request`, `approve_pull_request`, `unapprove_pull_request`, `request_changes_pull_request`, `unrequest_changes_pull_request`, `decline_pull_request`, `merge_pull_request` |
+| **Comments** | `get_pull_request_comments`, `add_pull_request_comment`, `get_pull_request_activity` |
+| **Diff / Review** | `get_pull_request_diff`, `get_pull_request_diffstat`, `get_pull_request_commits` |
+| **Build / CI** | `get_pull_request_statuses`, `get_commit_statuses` |
 | **Pipelines** | `list_pipeline_runs`, `get_pipeline_run`, `get_pipeline_steps`, `get_pipeline_step_logs` |
 
 > `merge_pull_request` is disabled by default. Enable it in `configs/tools.json`.
@@ -149,7 +171,7 @@ Then configure your AI assistant to use `docker exec`:
 ```json
 {
   "mcpServers": {
-    "bitbucket": {
+    "bitbucket-mcp": {
       "command": "docker",
       "args": ["exec", "-i", "bitbucket-mcp", "python", "-m", "src.main", "--transport", "stdio"]
     }
@@ -161,13 +183,13 @@ Then configure your AI assistant to use `docker exec`:
 
 ```bash
 # Install dev dependencies
-pip install -e '.[dev]'
+uv sync --extra dev
 
 # Run tests
-pytest tests/ -v
+uv run pytest tests/ -v
 
 # Run specific test
-pytest tests/test_client.py -v
+uv run pytest tests/test_client.py -v
 ```
 
 ## Requirements
@@ -181,8 +203,8 @@ MIT
 
 ## References
 
-- [MCP Registry](https://registry.modelcontextprotocol.io/) - Official MCP server registry
-- [PyPI Package](https://pypi.org/project/bitbucket-mcp-py/) - Python package
+- [MCP Registry](https://registry.modelcontextprotocol.io/) — Official MCP server registry
+- [PyPI Package](https://pypi.org/project/bitbucket-mcp-py/) — Python package
 - [MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk)
 - [Bitbucket API 2.0](https://developer.atlassian.com/cloud/bitbucket/rest/api-group-pullrequests/)
 - [FastMCP Framework](https://gofastmcp.com/)

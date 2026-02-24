@@ -4,9 +4,40 @@
 
 **Name**: bitbucket-mcp-py
 **Type**: MCP (Model Context Protocol) Server for Bitbucket API
-**Version**: 1.4.1
+**Version**: 1.8.0
 **Python**: 3.12+
 **Container Runtime**: Podman (preferred) or Docker
+
+## Client Configuration (uvx — recommended)
+
+**Claude Code CLI:**
+```bash
+claude mcp add bitbucket-mcp \
+  -e BITBUCKET_USERNAME=your-email@example.com \
+  -e BITBUCKET_TOKEN=your-api-token \
+  -e BITBUCKET_WORKSPACE=your-workspace \
+  -- uvx --from bitbucket-mcp-py bitbucket-mcp
+```
+
+**Claude Code / GitHub Copilot JSON config:**
+```json
+{
+  "mcpServers": {
+    "bitbucket-mcp": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["--from", "bitbucket-mcp-py", "bitbucket-mcp"],
+      "env": {
+        "BITBUCKET_USERNAME": "your-email@example.com",
+        "BITBUCKET_TOKEN": "your-api-token",
+        "BITBUCKET_WORKSPACE": "your-workspace"
+      }
+    }
+  }
+}
+```
+
+> **Note**: The PyPI package is `bitbucket-mcp-py` but the command entry point is `bitbucket-mcp`. The `--from` flag is required with `uvx`.
 
 ## Quick Commands
 
@@ -76,14 +107,15 @@ security add-generic-password -s "bitbucket-mcp" -a "bitbucket_workspace" -w "wo
 - **Method**: Basic Auth (`Authorization: Basic base64(email:token)`)
 - **API Base**: `https://api.bitbucket.org/2.0`
 
-### MCP Tools (23 total)
+### MCP Tools (24 total)
 
 | Category | Tools |
 |----------|-------|
 | **Repositories** | `list_repositories`, `get_repository` |
-| **Pull Requests** | `get_pull_requests`, `get_pull_request`, `create_pull_request`, `update_pull_request`, `approve_pull_request`, `unapprove_pull_request`, `decline_pull_request` |
+| **Pull Requests** | `get_pull_requests`, `get_pull_request`, `create_pull_request`, `update_pull_request`, `approve_pull_request`, `unapprove_pull_request`, `request_changes_pull_request`, `unrequest_changes_pull_request`, `decline_pull_request`, `merge_pull_request` |
 | **Comments** | `get_pull_request_comments`, `add_pull_request_comment`, `get_pull_request_activity` |
-| **Diff/Status** | `get_pull_request_diff`, `get_pull_request_commits`, `get_pull_request_statuses`, `get_pull_request_diffstat` |
+| **Diff / Review** | `get_pull_request_diff`, `get_pull_request_diffstat`, `get_pull_request_commits` |
+| **Build / CI** | `get_pull_request_statuses`, `get_commit_statuses` |
 | **Pipelines** | `list_pipeline_runs`, `get_pipeline_run`, `get_pipeline_steps`, `get_pipeline_step_logs` |
 
 **Disabled by default**: `merge_pull_request` (safety)
@@ -128,9 +160,9 @@ GitHub Actions workflow (`.github/workflows/ci.yml`):
 
 ### Running Tests
 ```bash
-make test                    # All tests
-pytest tests/ -v             # Verbose
-pytest tests/test_client.py  # Specific file
+make test                              # All tests (via Makefile)
+uv run pytest tests/ -v               # Verbose
+uv run pytest tests/test_client.py    # Specific file
 ```
 
 ### Code Patterns
@@ -145,7 +177,7 @@ async def get_pull_request(self, repo_slug: str, pr_id: int) -> Dict[str, Any]:
 
 **Tool registration** (server.py):
 ```python
-@conditional_tool("pull_requests", "get_pull_request")
+@conditional_tool()
 async def get_pull_request(...) -> Dict[str, Any]:
     ...
 ```
@@ -185,12 +217,10 @@ RUNTIME := $(shell command -v podman 2>/dev/null || command -v docker 2>/dev/nul
 ## Publishing
 
 ### PyPI
-```bash
-python -m build
-python -m twine upload dist/* -u __token__ -p <PYPI_TOKEN>
-```
+
+Handled automatically by GitHub Actions on `git tag`. No manual upload needed.
+
 - Package: https://pypi.org/project/bitbucket-mcp-py/
-- Install: `pip install bitbucket-mcp-py`
 
 ### MCP Registry
 ```bash
@@ -211,14 +241,12 @@ Then: `git tag vX.Y.Z && git push origin vX.Y.Z` → GitHub Actions handles the 
 
 ## Recent Changes
 
+- Added `request_changes_pull_request` and `unrequest_changes_pull_request` tools (v1.8.0)
+- Added `get_commit_statuses` tool for Jenkins/CI polling without a PR (v1.7.0)
 - Published to PyPI and MCP Registry
 - Added GitHub Actions CI workflow (pytest + coverage + build)
 - Added slim response transformers to reduce LLM token usage (`src/utils/transformers.py`)
-- Configured hatch wheel build for `src/` layout
-- Added `respx` to dev dependencies
 - Added secure credentials management with keychain support (`src/utils/credentials.py`)
-- Simplified Makefile (uses podman/docker directly, no docker-compose)
-- Added `max_pages=None` support for unlimited pagination
 
 ## Conventions
 
