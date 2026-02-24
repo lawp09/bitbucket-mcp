@@ -4,7 +4,7 @@
 
 **Name**: bitbucket-mcp-py
 **Type**: MCP (Model Context Protocol) Server for Bitbucket API
-**Version**: 1.8.0
+**Version**: 1.8.1
 **Python**: 3.12+
 **Container Runtime**: Podman (preferred) or Docker
 
@@ -71,7 +71,8 @@ configs/
 └── tools.json           # Tool enable/disable configuration
 
 .github/workflows/
-└── ci.yml               # CI pipeline (tests + build)
+├── ci.yml               # CI pipeline (tests + build)
+└── release.yml          # Release pipeline (PyPI + MCP Registry + GitHub Release)
 
 tests/                   # pytest test suite
 scripts/                 # Shell scripts (build.sh, run.sh)
@@ -151,10 +152,14 @@ All tool responses pass through transformers (`src/utils/transformers.py`) that 
 
 ## CI/CD
 
-GitHub Actions workflow (`.github/workflows/ci.yml`):
+**CI** (`.github/workflows/ci.yml`):
 - **Triggers**: push to `main`, PR targeting `main`
 - **Steps**: Install deps, run pytest with coverage, build package
-- Python 3.12, pip cache enabled
+
+**Release** (`.github/workflows/release.yml`):
+- **Triggers**: git tag push `v*`
+- **Jobs**: `test` → `build` → `publish-pypi` → `publish-mcp-registry` → `github-release`
+- PyPI via OIDC Trusted Publisher, MCP Registry via `MCP_GITHUB_TOKEN` secret
 
 ## Development
 
@@ -211,6 +216,7 @@ RUNTIME := $(shell command -v podman 2>/dev/null || command -v docker 2>/dev/nul
 | `src/utils/transformers.py` | Slim response transformers (token reduction) |
 | `Makefile` | Container management (podman/docker) |
 | `.github/workflows/ci.yml` | GitHub Actions CI pipeline |
+| `.github/workflows/release.yml` | Release pipeline (PyPI + MCP Registry + GitHub Release) |
 | `.env.example` | Template for credentials (copy to .env) |
 | `server.json` | MCP Registry manifest (for `mcp-publisher`) |
 
@@ -223,14 +229,18 @@ Handled automatically by GitHub Actions on `git tag`. No manual upload needed.
 - Package: https://pypi.org/project/bitbucket-mcp-py/
 
 ### MCP Registry
+
+Handled automatically by GitHub Actions on `git tag` (job `publish-mcp-registry`).
+
+Manual fallback:
 ```bash
-brew install mcp-publisher
 mcp-publisher login github    # GitHub OAuth (device flow)
-mcp-publisher publish         # Reads server.json
+mcp-publisher publish server.json
 ```
 - Registry: https://registry.modelcontextprotocol.io/
 - Server name: `io.github.lawp09/bitbucket-mcp`
 - **Important**: README must contain `<!-- mcp-name: io.github.lawp09/bitbucket-mcp -->` for PyPI ownership validation
+- **Secret**: `MCP_GITHUB_TOKEN` stored in GitHub Actions secrets
 
 ### Version Bump Checklist
 > Version is now derived from git tags via `hatch-vcs`. Only 2 files to update manually:
@@ -241,10 +251,12 @@ Then: `git tag vX.Y.Z && git push origin vX.Y.Z` → GitHub Actions handles the 
 
 ## Recent Changes
 
+- Automated MCP Registry publish in release pipeline — `publish-mcp-registry` job (v1.8.1)
+- Added `/release` Claude Code skill for orchestrating the full release workflow (v1.8.1)
 - Added `request_changes_pull_request` and `unrequest_changes_pull_request` tools (v1.8.0)
 - Added `get_commit_statuses` tool for Jenkins/CI polling without a PR (v1.7.0)
 - Published to PyPI and MCP Registry
-- Added GitHub Actions CI workflow (pytest + coverage + build)
+- Added GitHub Actions release pipeline (PyPI OIDC + MCP Registry + GitHub Release)
 - Added slim response transformers to reduce LLM token usage (`src/utils/transformers.py`)
 - Added secure credentials management with keychain support (`src/utils/credentials.py`)
 
