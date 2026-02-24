@@ -26,7 +26,7 @@ The recommended way to run the server is via **uvx** (zero install, isolated env
 uvx --from bitbucket-mcp-py bitbucket-mcp
 
 # Pin a specific version
-uvx --from bitbucket-mcp-py==1.8.0 bitbucket-mcp
+uvx --from bitbucket-mcp-py==1.8.1 bitbucket-mcp
 ```
 
 > **Why `--from`?** The PyPI package is `bitbucket-mcp-py` but the command entry point is `bitbucket-mcp`. The `--from` flag tells uvx which package to install.
