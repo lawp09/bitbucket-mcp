@@ -12,7 +12,7 @@ def test_get_client_missing_env_vars():
     src.server._bitbucket_client = None
 
     with patch.dict(os.environ, {}, clear=True):
-        with patch("src.utils.credentials.keyring.get_password", return_value=None):
+        with patch("src.utils.credentials.KEYRING_AVAILABLE", False):
             with pytest.raises(ValueError) as exc_info:
                 get_client()
 
