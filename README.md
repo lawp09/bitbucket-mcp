@@ -4,6 +4,8 @@
 
 [![PyPI](https://img.shields.io/pypi/v/bitbucket-mcp-py)](https://pypi.org/project/bitbucket-mcp-py/)
 [![Python](https://img.shields.io/pypi/pyversions/bitbucket-mcp-py)](https://pypi.org/project/bitbucket-mcp-py/)
+[![CI](https://github.com/lawp09/bitbucket-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/lawp09/bitbucket-mcp/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/lawp09/bitbucket-mcp/actions/workflows/codeql.yml/badge.svg)](https://github.com/lawp09/bitbucket-mcp/actions/workflows/codeql.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Connect **Claude Code**, **VS Code (GitHub Copilot)**, **Cursor**, and any MCP-compatible AI assistant to your Bitbucket Cloud repositories. Review pull requests, monitor pipelines, and manage your code — all through natural language.
