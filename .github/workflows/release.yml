@@ -111,9 +111,9 @@ jobs:
 
       - name: Publish to MCP Registry
         env:
-          MCP_REGISTRY_TOKEN: ${{ secrets.MCP_GITHUB_TOKEN }}
+          MCP_GITHUB_TOKEN: ${{ secrets.MCP_GITHUB_TOKEN }}
         run: |
-          echo "$MCP_REGISTRY_TOKEN" > .mcpregistry_github_token
+          mcp-publisher login github
           mcp-publisher publish server.json
 
   github-release:
