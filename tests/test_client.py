@@ -84,3 +84,13 @@ def test_new_methods_exist():
     assert callable(getattr(client, "get_pull_request_statuses"))
     assert callable(getattr(client, "get_pull_request_diffstat"))
     assert callable(getattr(client, "get_commit_statuses"))
+
+
+def test_request_changes_methods_exist():
+    """Test that request_changes and unrequest_changes methods are present in the client"""
+    client = BitbucketClient("test@example.com", "token", "workspace")
+
+    assert hasattr(client, "request_changes_pull_request")
+    assert hasattr(client, "unrequest_changes_pull_request")
+    assert callable(getattr(client, "request_changes_pull_request"))
+    assert callable(getattr(client, "unrequest_changes_pull_request"))

@@ -37,6 +37,14 @@
         "enabled": true,
         "description": "Remove approval from a pull request"
       },
+      "request_changes_pull_request": {
+        "enabled": true,
+        "description": "Request changes on a pull request (sets status to needs work)"
+      },
+      "unrequest_changes_pull_request": {
+        "enabled": true,
+        "description": "Remove request changes status from a pull request"
+      },
       "decline_pull_request": {
         "enabled": true,
         "description": "Decline a pull request"

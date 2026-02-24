@@ -1,5 +1,13 @@
 # Changelog - Bitbucket MCP Server Python
 
+## [1.8.0] - 2026-02-24
+
+### Added
+- New MCP tool `request_changes_pull_request` — sets reviewer status to "needs work" via `POST .../request-changes`
+- New MCP tool `unrequest_changes_pull_request` — removes "needs work" status via `DELETE .../request-changes`
+
+---
+
 ## [1.7.0] - 2026-02-23
 
 ### Added

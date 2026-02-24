@@ -356,6 +356,49 @@ async def unapprove_pull_request(
 
 
 @conditional_tool()
+async def request_changes_pull_request(
+    repo_slug: str,
+    pull_request_id: str,
+    workspace: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Request changes on a pull request (sets reviewer status to 'needs work').
+
+    Args:
+        repo_slug: Repository slug
+        pull_request_id: Pull request ID
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Participant details with updated state
+    """
+    client = get_client()
+    return await client.request_changes_pull_request(repo_slug, pull_request_id, workspace)
+
+
+@conditional_tool()
+async def unrequest_changes_pull_request(
+    repo_slug: str,
+    pull_request_id: str,
+    workspace: Optional[str] = None
+) -> str:
+    """
+    Remove 'request changes' status from a pull request.
+
+    Args:
+        repo_slug: Repository slug
+        pull_request_id: Pull request ID
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Success message
+    """
+    client = get_client()
+    await client.unrequest_changes_pull_request(repo_slug, pull_request_id, workspace)
+    return "Request changes removed successfully"
+
+
+@conditional_tool()
 async def decline_pull_request(
     repo_slug: str,
     pull_request_id: str,

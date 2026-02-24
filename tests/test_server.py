@@ -7,16 +7,16 @@ from src.server import get_client, _bitbucket_client
 
 
 def test_get_client_missing_env_vars():
-    """Test that get_client raises error when env vars missing"""
-    # Clear any existing client
+    """Test that get_client raises error when env vars missing and no keychain"""
     import src.server
     src.server._bitbucket_client = None
 
     with patch.dict(os.environ, {}, clear=True):
-        with pytest.raises(ValueError) as exc_info:
-            get_client()
+        with patch("src.utils.credentials.keyring.get_password", return_value=None):
+            with pytest.raises(ValueError) as exc_info:
+                get_client()
 
-        assert "Missing required credentials" in str(exc_info.value)
+    assert "Missing required credentials" in str(exc_info.value)
 
 
 def test_get_client_with_env_vars():
@@ -74,6 +74,8 @@ async def test_mcp_server_tools_registered():
     assert "list_repositories" in tool_names
     assert "add_pull_request_comment" in tool_names
     assert "approve_pull_request" in tool_names
+    assert "request_changes_pull_request" in tool_names
+    assert "unrequest_changes_pull_request" in tool_names
     # merge_pull_request is disabled by default in configs/tools.json
     assert "get_pull_request_statuses" in tool_names
     assert "get_pull_request_diffstat" in tool_names

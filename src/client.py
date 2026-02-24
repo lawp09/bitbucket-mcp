@@ -311,6 +311,51 @@ class BitbucketClient:
         )
         response.raise_for_status()
 
+    async def request_changes_pull_request(
+        self,
+        repo_slug: str,
+        pull_request_id: str,
+        workspace: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Request changes on a pull request (sets status to 'needs work').
+
+        Args:
+            repo_slug: Repository slug
+            pull_request_id: Pull request ID
+            workspace: Workspace name (defaults to self.workspace)
+
+        Returns:
+            Participant details with updated state
+        """
+        ws = workspace or self.workspace
+        response = await self.client.post(
+            f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}/request-changes",
+            json={}
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def unrequest_changes_pull_request(
+        self,
+        repo_slug: str,
+        pull_request_id: str,
+        workspace: Optional[str] = None
+    ) -> None:
+        """
+        Remove 'request changes' status from a pull request.
+
+        Args:
+            repo_slug: Repository slug
+            pull_request_id: Pull request ID
+            workspace: Workspace name (defaults to self.workspace)
+        """
+        ws = workspace or self.workspace
+        response = await self.client.delete(
+            f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}/request-changes"
+        )
+        response.raise_for_status()
+
     async def decline_pull_request(
         self,
         repo_slug: str,
