@@ -862,3 +862,29 @@ class TestSizeReduction:
         slimmed = self._json_size(slim_comment(SAMPLE_COMMENT))
         reduction = (original - slimmed) / original * 100
         assert reduction > 40, f"Expected >40% reduction, got {reduction:.0f}%"
+
+
+# ========== Default Reviewers Tests ==========
+
+class TestSlimReviewer:
+    def test_slim_reviewer(self):
+        from src.utils.transformers import slim_reviewer
+
+        reviewer = {
+            "display_name": "John Doe",
+            "nickname": "jdoe",
+            "uuid": "{abc-123}",
+            "reviewer_type": "user",
+            "type": "user",
+            "links": {"self": {"href": "https://..."}},
+            "account_id": "123456",
+        }
+
+        result = slim_reviewer(reviewer)
+
+        assert result == {
+            "display_name": "John Doe",
+            "nickname": "jdoe",
+            "uuid": "{abc-123}",
+            "type": "user",
+        }

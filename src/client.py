@@ -516,6 +516,132 @@ class BitbucketClient:
         response.raise_for_status()
         return response.json()
 
+    async def get_pull_request_comment(
+        self,
+        repo_slug: str,
+        pull_request_id: str,
+        comment_id: str,
+        workspace: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Get a specific comment on a pull request.
+
+        Args:
+            repo_slug: Repository slug
+            pull_request_id: Pull request ID
+            comment_id: Comment ID
+            workspace: Workspace name (defaults to self.workspace)
+
+        Returns:
+            Comment details
+        """
+        ws = workspace or self.workspace
+        response = await self.client.get(
+            f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}/comments/{comment_id}"
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def update_pull_request_comment(
+        self,
+        repo_slug: str,
+        pull_request_id: str,
+        comment_id: str,
+        content: str,
+        workspace: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Update a comment on a pull request.
+
+        Args:
+            repo_slug: Repository slug
+            pull_request_id: Pull request ID
+            comment_id: Comment ID
+            content: New comment content (markdown)
+            workspace: Workspace name (defaults to self.workspace)
+
+        Returns:
+            Updated comment details
+        """
+        ws = workspace or self.workspace
+        response = await self.client.put(
+            f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}/comments/{comment_id}",
+            json={"content": {"raw": content}}
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def delete_pull_request_comment(
+        self,
+        repo_slug: str,
+        pull_request_id: str,
+        comment_id: str,
+        workspace: Optional[str] = None
+    ) -> None:
+        """
+        Delete a comment on a pull request.
+
+        Args:
+            repo_slug: Repository slug
+            pull_request_id: Pull request ID
+            comment_id: Comment ID
+            workspace: Workspace name (defaults to self.workspace)
+        """
+        ws = workspace or self.workspace
+        response = await self.client.delete(
+            f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}/comments/{comment_id}"
+        )
+        response.raise_for_status()
+
+    async def resolve_pull_request_comment(
+        self,
+        repo_slug: str,
+        pull_request_id: str,
+        comment_id: str,
+        workspace: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Resolve a comment on a pull request.
+
+        Args:
+            repo_slug: Repository slug
+            pull_request_id: Pull request ID
+            comment_id: Comment ID
+            workspace: Workspace name (defaults to self.workspace)
+
+        Returns:
+            Resolution details
+        """
+        ws = workspace or self.workspace
+        response = await self.client.post(
+            f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}/comments/{comment_id}/resolve",
+            json={}
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def reopen_pull_request_comment(
+        self,
+        repo_slug: str,
+        pull_request_id: str,
+        comment_id: str,
+        workspace: Optional[str] = None
+    ) -> None:
+        """
+        Reopen (unresolve) a comment on a pull request.
+
+        Args:
+            repo_slug: Repository slug
+            pull_request_id: Pull request ID
+            comment_id: Comment ID
+            workspace: Workspace name (defaults to self.workspace)
+        """
+        ws = workspace or self.workspace
+        response = await self.client.delete(
+            f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}/comments/{comment_id}/resolve"
+        )
+        response.raise_for_status()
+
     async def get_pull_request_diff(
         self,
         repo_slug: str,
@@ -833,6 +959,89 @@ class BitbucketClient:
         return await aggregate_pages(
             self.client,
             f"/repositories/{ws}/{repo_slug}/commit/{commit_hash}/statuses",
+            {},
+            config
+        )
+
+    async def run_pipeline(
+        self,
+        repo_slug: str,
+        branch: str,
+        workspace: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Trigger a new pipeline run on a branch.
+
+        Args:
+            repo_slug: Repository slug
+            branch: Branch name to run the pipeline on
+            workspace: Workspace name (defaults to self.workspace)
+
+        Returns:
+            Created pipeline run details
+        """
+        ws = workspace or self.workspace
+        payload = {
+            "target": {
+                "ref_type": "branch",
+                "type": "pipeline_ref_target",
+                "ref_name": branch
+            }
+        }
+        response = await self.client.post(
+            f"/repositories/{ws}/{repo_slug}/pipelines/",
+            json=payload
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def stop_pipeline(
+        self,
+        repo_slug: str,
+        pipeline_uuid: str,
+        workspace: Optional[str] = None
+    ) -> None:
+        """
+        Stop a running pipeline.
+
+        Args:
+            repo_slug: Repository slug
+            pipeline_uuid: Pipeline UUID
+            workspace: Workspace name (defaults to self.workspace)
+        """
+        ws = workspace or self.workspace
+        response = await self.client.post(
+            f"/repositories/{ws}/{repo_slug}/pipelines/{pipeline_uuid}/stopPipeline",
+            json={}
+        )
+        response.raise_for_status()
+
+    # ========== Default Reviewers ==========
+
+    async def get_effective_default_reviewers(
+        self,
+        repo_slug: str,
+        workspace: Optional[str] = None,
+        page_size: int = 30,
+        max_pages: Optional[int] = 1
+    ) -> Dict[str, Any]:
+        """
+        Get effective default reviewers for a repository.
+
+        Args:
+            repo_slug: Repository slug
+            workspace: Workspace name (defaults to self.workspace)
+            page_size: Items per page (default: 30)
+            max_pages: Maximum pages to fetch (default: 1)
+
+        Returns:
+            Paginated list of default reviewers
+        """
+        ws = workspace or self.workspace
+        config = PaginationConfig(page_size=page_size, max_pages=max_pages)
+        return await aggregate_pages(
+            self.client,
+            f"/repositories/{ws}/{repo_slug}/effective-default-reviewers",
             {},
             config
         )

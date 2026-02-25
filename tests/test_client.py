@@ -94,3 +94,23 @@ def test_request_changes_methods_exist():
     assert hasattr(client, "unrequest_changes_pull_request")
     assert callable(getattr(client, "request_changes_pull_request"))
     assert callable(getattr(client, "unrequest_changes_pull_request"))
+
+
+def test_phase1_quick_wins_methods_exist():
+    """Test that Phase 1 Quick Wins methods are present in the client"""
+    client = BitbucketClient("test@example.com", "token", "workspace")
+
+    methods = [
+        "get_pull_request_comment",
+        "update_pull_request_comment",
+        "delete_pull_request_comment",
+        "resolve_pull_request_comment",
+        "reopen_pull_request_comment",
+        "run_pipeline",
+        "stop_pipeline",
+        "get_effective_default_reviewers",
+    ]
+
+    for method in methods:
+        assert hasattr(client, method), f"Missing method: {method}"
+        assert callable(getattr(client, method)), f"Not callable: {method}"

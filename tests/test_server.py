@@ -80,6 +80,15 @@ async def test_mcp_server_tools_registered():
     assert "get_pull_request_statuses" in tool_names
     assert "get_pull_request_diffstat" in tool_names
     assert "get_commit_statuses" in tool_names
+    # Phase 1 Quick Wins tools
+    assert "get_pull_request_comment" in tool_names
+    assert "update_pull_request_comment" in tool_names
+    # delete_pull_request_comment is disabled by default in configs/tools.json
+    assert "resolve_pull_request_comment" in tool_names
+    assert "reopen_pull_request_comment" in tool_names
+    assert "run_pipeline" in tool_names
+    # stop_pipeline is disabled by default in configs/tools.json
+    assert "get_effective_default_reviewers" in tool_names
 
 
 @pytest.mark.asyncio
