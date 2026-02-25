@@ -1,5 +1,25 @@
 # Changelog - Bitbucket MCP Server Python
 
+## [1.10.0] - 2026-02-25
+
+### Added
+- `get_pull_request_tasks` — list tasks on a pull request (paginated)
+- `get_pull_request_task` — get a single task by ID
+- `create_pull_request_task` — create a task on a pull request
+- `update_pull_request_task` — update task content and/or state (UNRESOLVED/RESOLVED)
+- `delete_pull_request_task` — delete a task from a pull request
+- `get_pull_request_patch` — get git format-patch for a PR (disabled by default — use `get_pull_request_diff` for AI review)
+- `get_pull_requests_pending_review` — list open PRs where the current user is a reviewer
+- `workflow_dispatch` trigger added to CI workflow for manual runs
+
+### Changed
+- `get_pull_request_diff` — new optional `path` parameter to filter diff to a single file (~95% token reduction on large PRs)
+
+### Fixed
+- `get_pull_request_diff` — add `follow_redirects=True` to handle HTTP 302 redirects from Bitbucket CDN on large PRs
+
+---
+
 ## [1.9.0] - 2026-02-25
 
 ### Added
