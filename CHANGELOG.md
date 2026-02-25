@@ -1,5 +1,12 @@
 # Changelog - Bitbucket MCP Server Python
 
+## [1.10.1] - 2026-02-25
+
+### Fixed
+- Correct GitHub repository URLs in `pyproject.toml` project links (were pointing to `bitbucket-mcp-py` instead of `bitbucket-mcp`)
+
+---
+
 ## [1.10.0] - 2026-02-25
 
 ### Added
