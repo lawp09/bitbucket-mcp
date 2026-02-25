@@ -70,7 +70,7 @@
         "description": "Update a comment on a pull request"
       },
       "delete_pull_request_comment": {
-        "enabled": false,
+        "enabled": true,
         "description": "Delete a comment on a pull request"
       },
       "resolve_pull_request_comment": {
