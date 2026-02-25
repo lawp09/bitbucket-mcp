@@ -239,6 +239,29 @@ def slim_comment_list(data: Dict[str, Any]) -> Dict[str, Any]:
     return _slim_paginated(data, slim_comment)
 
 
+# ========== Tasks ==========
+
+def slim_task(task: Dict[str, Any]) -> Dict[str, Any]:
+    """Slim a PR task response to reduce LLM token usage."""
+    resolved_by = task.get("resolved_by")
+    return {
+        "id": task.get("id"),
+        "state": task.get("state"),
+        "content": task.get("content", {}).get("raw"),
+        "creator": task.get("creator", {}).get("display_name"),
+        "created_on": task.get("created_on"),
+        "updated_on": task.get("updated_on"),
+        "resolved_on": task.get("resolved_on"),
+        "resolved_by": resolved_by.get("display_name") if resolved_by else None,
+        "pending": task.get("pending", False),
+    }
+
+
+def slim_task_list(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Slim a paginated list of tasks."""
+    return _slim_paginated(data, slim_task)
+
+
 # ========== Activity ==========
 
 def _slim_activity_update(update: Dict[str, Any]) -> Dict[str, Any]:

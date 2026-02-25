@@ -100,6 +100,36 @@
       "get_pull_request_diffstat": {
         "enabled": true,
         "description": "Get file modification statistics for a pull request"
+      },
+      "get_pull_requests_pending_review": {
+        "enabled": true,
+        "description": "Get open pull requests pending review by current user"
+      },
+      "get_pull_request_patch": {
+        "enabled": true,
+        "description": "Get the patch for a pull request"
+      }
+    },
+    "tasks": {
+      "get_pull_request_tasks": {
+        "enabled": true,
+        "description": "List tasks on a pull request"
+      },
+      "get_pull_request_task": {
+        "enabled": true,
+        "description": "Get a specific pull request task"
+      },
+      "create_pull_request_task": {
+        "enabled": true,
+        "description": "Create a task on a pull request"
+      },
+      "update_pull_request_task": {
+        "enabled": true,
+        "description": "Update a pull request task"
+      },
+      "delete_pull_request_task": {
+        "enabled": true,
+        "description": "Delete a pull request task"
       }
     },
     "commits": {

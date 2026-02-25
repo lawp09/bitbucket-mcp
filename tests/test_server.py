@@ -89,6 +89,14 @@ async def test_mcp_server_tools_registered():
     assert "run_pipeline" in tool_names
     # stop_pipeline is disabled by default in configs/tools.json
     assert "get_effective_default_reviewers" in tool_names
+    # Phase 2 tools
+    assert "get_pull_request_tasks" in tool_names
+    assert "get_pull_request_task" in tool_names
+    assert "create_pull_request_task" in tool_names
+    assert "update_pull_request_task" in tool_names
+    assert "delete_pull_request_task" in tool_names
+    assert "get_pull_request_patch" in tool_names
+    assert "get_pull_requests_pending_review" in tool_names
 
 
 @pytest.mark.asyncio

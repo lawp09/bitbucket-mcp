@@ -20,6 +20,7 @@ from .utils.transformers import (
     slim_pipeline_run, slim_pipeline_run_list,
     slim_pipeline_step_list,
     slim_reviewer_list,
+    slim_task, slim_task_list,
 )
 
 # Configuration logging vers stderr uniquement (container-friendly)
@@ -214,6 +215,34 @@ async def get_pull_requests(
     """
     client = get_client()
     result = await client.get_pull_requests(repo_slug, workspace, state, page_size, max_pages)
+    return slim_pull_request_list(result)
+
+
+@conditional_tool()
+async def get_pull_requests_pending_review(
+    repo_slug: str,
+    workspace: Optional[str] = None,
+    page_size: int = 30,
+    max_pages: Optional[int] = 1
+) -> Dict[str, Any]:
+    """
+    Get open pull requests where the current user is a reviewer.
+
+    Use this to find PRs that need your review attention.
+
+    Args:
+        repo_slug: Repository slug
+        workspace: Workspace name (optional, defaults to configured workspace)
+        page_size: Items per page (default: 30)
+        max_pages: Maximum pages to fetch (default: 1, max recommended: 10)
+
+    Returns:
+        Paginated list of pull requests pending your review
+    """
+    client = get_client()
+    result = await client.get_pull_requests_pending_review(
+        repo_slug, workspace, page_size, max_pages
+    )
     return slim_pull_request_list(result)
 
 
@@ -686,6 +715,148 @@ async def reopen_pull_request_comment(
     return "Comment reopened successfully"
 
 
+# ========== PR Task Tools ==========
+
+@conditional_tool()
+async def get_pull_request_tasks(
+    repo_slug: str,
+    pull_request_id: str,
+    workspace: Optional[str] = None,
+    page_size: int = 10,
+    max_pages: Optional[int] = 1
+) -> Dict[str, Any]:
+    """
+    List tasks on a pull request with pagination support.
+
+    Args:
+        repo_slug: Repository slug
+        pull_request_id: Pull request ID
+        workspace: Workspace name (optional, defaults to configured workspace)
+        page_size: Items per page (default: 10, max recommended: 100)
+        max_pages: Maximum pages to fetch (default: 1, max recommended: 10)
+
+    Returns:
+        Paginated list of tasks with state, content, creator info
+    """
+    client = get_client()
+    result = await client.get_pull_request_tasks(
+        repo_slug, pull_request_id, workspace, page_size, max_pages
+    )
+    return slim_task_list(result)
+
+
+@conditional_tool()
+async def get_pull_request_task(
+    repo_slug: str,
+    pull_request_id: str,
+    task_id: str,
+    workspace: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Get a specific task on a pull request.
+
+    Args:
+        repo_slug: Repository slug
+        pull_request_id: Pull request ID
+        task_id: Task ID
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Task details with state, content, creator, resolution info
+    """
+    client = get_client()
+    result = await client.get_pull_request_task(
+        repo_slug, pull_request_id, task_id, workspace
+    )
+    return slim_task(result)
+
+
+@conditional_tool()
+async def create_pull_request_task(
+    repo_slug: str,
+    pull_request_id: str,
+    content: str,
+    workspace: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Create a task on a pull request.
+
+    Args:
+        repo_slug: Repository slug
+        pull_request_id: Pull request ID
+        content: Task content in markdown format
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Created task details
+    """
+    client = get_client()
+    result = await client.create_pull_request_task(
+        repo_slug, pull_request_id, content, workspace
+    )
+    return slim_task(result)
+
+
+@conditional_tool()
+async def update_pull_request_task(
+    repo_slug: str,
+    pull_request_id: str,
+    task_id: str,
+    content: Optional[str] = None,
+    state: Optional[str] = None,
+    workspace: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Update a pull request task (content and/or state).
+
+    Args:
+        repo_slug: Repository slug
+        pull_request_id: Pull request ID
+        task_id: Task ID
+        content: New task content in markdown format (optional)
+        state: New task state: UNRESOLVED or RESOLVED (optional)
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Updated task details
+    """
+    if state is not None and state not in ("UNRESOLVED", "RESOLVED"):
+        raise ValueError(f"Invalid state '{state}'. Must be 'UNRESOLVED' or 'RESOLVED'")
+    if content is None and state is None:
+        raise ValueError("At least one of 'content' or 'state' must be provided")
+    client = get_client()
+    result = await client.update_pull_request_task(
+        repo_slug, pull_request_id, task_id, content, state, workspace
+    )
+    return slim_task(result)
+
+
+@conditional_tool()
+async def delete_pull_request_task(
+    repo_slug: str,
+    pull_request_id: str,
+    task_id: str,
+    workspace: Optional[str] = None
+) -> str:
+    """
+    Delete a task on a pull request.
+
+    Args:
+        repo_slug: Repository slug
+        pull_request_id: Pull request ID
+        task_id: Task ID
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Success message
+    """
+    client = get_client()
+    await client.delete_pull_request_task(
+        repo_slug, pull_request_id, task_id, workspace
+    )
+    return "Task deleted successfully"
+
+
 @conditional_tool()
 async def get_pull_request_diff(
     repo_slug: str,
@@ -705,6 +876,30 @@ async def get_pull_request_diff(
     """
     client = get_client()
     return await client.get_pull_request_diff(repo_slug, pull_request_id, workspace)
+
+
+@conditional_tool()
+async def get_pull_request_patch(
+    repo_slug: str,
+    pull_request_id: str,
+    workspace: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Get the patch for a pull request (git format-patch style).
+
+    The patch includes full commit metadata and can be applied with git am.
+    Use get_pull_request_diff for a simpler unified diff.
+
+    Args:
+        repo_slug: Repository slug
+        pull_request_id: Pull request ID
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Dictionary with patch content as string
+    """
+    client = get_client()
+    return await client.get_pull_request_patch(repo_slug, pull_request_id, workspace)
 
 
 @conditional_tool()

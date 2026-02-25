@@ -114,3 +114,22 @@ def test_phase1_quick_wins_methods_exist():
     for method in methods:
         assert hasattr(client, method), f"Missing method: {method}"
         assert callable(getattr(client, method)), f"Not callable: {method}"
+
+
+def test_phase2_methods_exist():
+    """Test that Phase 2 methods are present in the client"""
+    client = BitbucketClient("test@example.com", "token", "workspace")
+
+    methods = [
+        "get_pull_request_tasks",
+        "get_pull_request_task",
+        "create_pull_request_task",
+        "update_pull_request_task",
+        "delete_pull_request_task",
+        "get_pull_request_patch",
+        "get_pull_requests_pending_review",
+    ]
+
+    for method in methods:
+        assert hasattr(client, method), f"Missing method: {method}"
+        assert callable(getattr(client, method)), f"Not callable: {method}"
