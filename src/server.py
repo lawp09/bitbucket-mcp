@@ -861,7 +861,8 @@ async def delete_pull_request_task(
 async def get_pull_request_diff(
     repo_slug: str,
     pull_request_id: str,
-    workspace: Optional[str] = None
+    workspace: Optional[str] = None,
+    path: Optional[str] = None
 ) -> str:
     """
     Get diff for a pull request.
@@ -870,12 +871,14 @@ async def get_pull_request_diff(
         repo_slug: Repository slug
         pull_request_id: Pull request ID
         workspace: Workspace name (optional, defaults to configured workspace)
+        path: Filter diff to a specific file path to reduce token usage (optional).
+              Example: "src/middlewares/authorizationMiddleware.ts"
 
     Returns:
         Unified diff as string
     """
     client = get_client()
-    return await client.get_pull_request_diff(repo_slug, pull_request_id, workspace)
+    return await client.get_pull_request_diff(repo_slug, pull_request_id, workspace, path)
 
 
 @conditional_tool()

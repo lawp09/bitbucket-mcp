@@ -851,7 +851,8 @@ class BitbucketClient:
         self,
         repo_slug: str,
         pull_request_id: str,
-        workspace: Optional[str] = None
+        workspace: Optional[str] = None,
+        path: Optional[str] = None
     ) -> str:
         """
         Get the unified diff for a pull request.
@@ -860,13 +861,18 @@ class BitbucketClient:
             repo_slug: Repository slug
             pull_request_id: Pull request ID
             workspace: Workspace name (defaults to self.workspace)
+            path: Filter diff to a specific file path (optional)
 
         Returns:
             Unified diff as string
         """
         ws = workspace or self.workspace
+        params = {}
+        if path:
+            params["path"] = path
         response = await self.client.get(
-            f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}/diff"
+            f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}/diff",
+            params=params
         )
         response.raise_for_status()
         return response.text

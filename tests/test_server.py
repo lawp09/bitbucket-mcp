@@ -95,7 +95,7 @@ async def test_mcp_server_tools_registered():
     assert "create_pull_request_task" in tool_names
     assert "update_pull_request_task" in tool_names
     assert "delete_pull_request_task" in tool_names
-    assert "get_pull_request_patch" in tool_names
+    assert "get_pull_request_patch" not in tool_names  # disabled by default (git am format)
     assert "get_pull_requests_pending_review" in tool_names
 
 

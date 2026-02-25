@@ -106,8 +106,8 @@
         "description": "Get open pull requests pending review by current user"
       },
       "get_pull_request_patch": {
-        "enabled": true,
-        "description": "Get the patch for a pull request"
+        "enabled": false,
+        "description": "Get the patch for a pull request (git am format, disabled by default — use get_pull_request_diff for AI review)"
       }
     },
     "tasks": {
