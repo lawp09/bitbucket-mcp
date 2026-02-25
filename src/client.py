@@ -872,7 +872,8 @@ class BitbucketClient:
             params["path"] = path
         response = await self.client.get(
             f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}/diff",
-            params=params
+            params=params,
+            follow_redirects=True
         )
         response.raise_for_status()
         return response.text
