@@ -12,7 +12,7 @@ Connect **Claude Code**, **VS Code (GitHub Copilot)**, **Cursor**, and any MCP-c
 
 ## Features
 
-- **32 MCP tools** — repositories, pull requests, comments, diffs, pipelines, build statuses, reviewers
+- **39 MCP tools** — repositories, pull requests, comments, tasks, diffs, pipelines, build statuses, reviewers
 - **Slim responses** — stripped API noise for lower LLM token usage
 - **Configurable** — enable/disable tools via `configs/tools.json`
 - **Secure credentials** — environment variables or system keychain
@@ -137,12 +137,19 @@ Add to `~/.cursor/mcp.json`:
 | **Repositories** | `list_repositories`, `get_repository` |
 | **Pull Requests** | `get_pull_requests`, `get_pull_request`, `create_pull_request`, `update_pull_request`, `approve_pull_request`, `unapprove_pull_request`, `request_changes_pull_request`, `unrequest_changes_pull_request`, `decline_pull_request`, `merge_pull_request` |
 | **Comments** | `get_pull_request_comments`, `add_pull_request_comment`, `get_pull_request_comment`, `update_pull_request_comment`, `delete_pull_request_comment`, `resolve_pull_request_comment`, `reopen_pull_request_comment`, `get_pull_request_activity` |
-| **Diff / Review** | `get_pull_request_diff`, `get_pull_request_diffstat`, `get_pull_request_commits` |
+| **Tasks PR** | `get_pull_request_tasks`, `get_pull_request_task`, `create_pull_request_task`, `update_pull_request_task`, `delete_pull_request_task` |
+| **Diff / Review** | `get_pull_request_diff`, `get_pull_request_patch`, `get_pull_request_diffstat`, `get_pull_request_commits` |
+| **PR Discovery** | `get_pull_requests_pending_review` |
 | **Build / CI** | `get_pull_request_statuses`, `get_commit_statuses` |
 | **Pipelines** | `list_pipeline_runs`, `get_pipeline_run`, `get_pipeline_steps`, `get_pipeline_step_logs`, `run_pipeline`, `stop_pipeline` |
 | **Reviewers** | `get_effective_default_reviewers` |
 
-> Disabled by default: `merge_pull_request` (safety), `stop_pipeline` (safety). Enable in `configs/tools.json`.
+> Disabled by default: `merge_pull_request` (safety), `stop_pipeline` (safety), `get_pull_request_patch` (git am format — not useful for AI review). Enable in `configs/tools.json`.
+
+> **Token tip** — `get_pull_request_diff` accepts an optional `path` parameter to filter the diff to a single file, reducing token usage by ~95% on large PRs:
+> ```
+> get_pull_request_diff(repo_slug, pull_request_id, path="src/services/myService.ts")
+> ```
 
 ## Credentials
 

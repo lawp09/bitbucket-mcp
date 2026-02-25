@@ -11,6 +11,7 @@ from src.utils.transformers import (
     slim_activity_entry, slim_activity_list,
     slim_pipeline_run, slim_pipeline_run_list,
     slim_pipeline_step, slim_pipeline_step_list,
+    slim_task, slim_task_list,
     _slim_user, _slim_paginated,
 )
 
@@ -862,6 +863,71 @@ class TestSizeReduction:
         slimmed = self._json_size(slim_comment(SAMPLE_COMMENT))
         reduction = (original - slimmed) / original * 100
         assert reduction > 40, f"Expected >40% reduction, got {reduction:.0f}%"
+
+
+SAMPLE_TASK = {
+    "id": 60479316,
+    "state": "UNRESOLVED",
+    "content": {
+        "type": "rendered",
+        "raw": "Add unit tests for the new endpoint",
+        "markup": "markdown",
+        "html": "<p>Add unit tests for the new endpoint</p>",
+    },
+    "created_on": "2026-02-25T19:07:54.839869+00:00",
+    "updated_on": "2026-02-25T19:07:54.839939+00:00",
+    "resolved_on": None,
+    "resolved_by": None,
+    "pending": False,
+    "creator": SAMPLE_USER,
+    "links": SAMPLE_LINKS,
+}
+
+
+class TestSlimTask:
+    def test_keeps_essential_fields(self):
+        result = slim_task(SAMPLE_TASK)
+        assert result["id"] == 60479316
+        assert result["state"] == "UNRESOLVED"
+        assert result["content"] == "Add unit tests for the new endpoint"
+        assert result["creator"] == "Philippe LAWSON"
+        assert result["created_on"] == "2026-02-25T19:07:54.839869+00:00"
+        assert result["pending"] is False
+
+    def test_strips_noise(self):
+        result = slim_task(SAMPLE_TASK)
+        assert "links" not in result
+        assert "type" not in result
+
+    def test_resolved_task(self):
+        resolved = {
+            **SAMPLE_TASK,
+            "state": "RESOLVED",
+            "resolved_on": "2026-02-25T20:00:00+00:00",
+            "resolved_by": SAMPLE_USER,
+        }
+        result = slim_task(resolved)
+        assert result["state"] == "RESOLVED"
+        assert result["resolved_on"] == "2026-02-25T20:00:00+00:00"
+        assert result["resolved_by"] == "Philippe LAWSON"
+
+    def test_unresolved_task(self):
+        result = slim_task(SAMPLE_TASK)
+        assert result["resolved_on"] is None
+        assert result["resolved_by"] is None
+
+    def test_task_list(self):
+        data = {"values": [SAMPLE_TASK, SAMPLE_TASK], "size": 2, "page": 1}
+        result = slim_task_list(data)
+        assert len(result["values"]) == 2
+        assert result["count"] == 2
+        assert result["values"][0]["id"] == 60479316
+
+    def test_task_content_extracts_raw(self):
+        """Verify that content.raw is extracted, not the full content object."""
+        result = slim_task(SAMPLE_TASK)
+        assert isinstance(result["content"], str)
+        assert "html" not in str(result["content"])
 
 
 # ========== Default Reviewers Tests ==========

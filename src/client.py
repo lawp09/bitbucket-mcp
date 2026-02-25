@@ -642,11 +642,217 @@ class BitbucketClient:
         )
         response.raise_for_status()
 
-    async def get_pull_request_diff(
+    # ========== PR Tasks ==========
+
+    async def get_pull_request_tasks(
+        self,
+        repo_slug: str,
+        pull_request_id: str,
+        workspace: Optional[str] = None,
+        page_size: int = 10,
+        max_pages: Optional[int] = 1
+    ) -> Dict[str, Any]:
+        """
+        Get tasks on a pull request with pagination support.
+
+        Args:
+            repo_slug: Repository slug
+            pull_request_id: Pull request ID
+            workspace: Workspace name (defaults to self.workspace)
+            page_size: Items per page (default: 10)
+            max_pages: Maximum pages to fetch (default: 1)
+
+        Returns:
+            Paginated list of tasks
+        """
+        ws = workspace or self.workspace
+        config = PaginationConfig(page_size=page_size, max_pages=max_pages)
+        return await aggregate_pages(
+            self.client,
+            f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}/tasks",
+            {},
+            config
+        )
+
+    async def get_pull_request_task(
+        self,
+        repo_slug: str,
+        pull_request_id: str,
+        task_id: str,
+        workspace: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Get a specific pull request task.
+
+        Args:
+            repo_slug: Repository slug
+            pull_request_id: Pull request ID
+            task_id: Task ID
+            workspace: Workspace name (defaults to self.workspace)
+
+        Returns:
+            Task object from Bitbucket API
+        """
+        ws = workspace or self.workspace
+        response = await self.client.get(
+            f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}/tasks/{task_id}"
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def create_pull_request_task(
+        self,
+        repo_slug: str,
+        pull_request_id: str,
+        content: str,
+        workspace: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Create a task on a pull request.
+
+        Args:
+            repo_slug: Repository slug
+            pull_request_id: Pull request ID
+            content: Task content (markdown)
+            workspace: Workspace name (defaults to self.workspace)
+
+        Returns:
+            Created task object
+        """
+        ws = workspace or self.workspace
+        payload = {
+            "content": {"raw": content},
+            "state": "UNRESOLVED"
+        }
+        response = await self.client.post(
+            f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}/tasks",
+            json=payload
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def update_pull_request_task(
+        self,
+        repo_slug: str,
+        pull_request_id: str,
+        task_id: str,
+        content: Optional[str] = None,
+        state: Optional[str] = None,
+        workspace: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Update a pull request task.
+
+        Args:
+            repo_slug: Repository slug
+            pull_request_id: Pull request ID
+            task_id: Task ID
+            content: New task content (markdown)
+            state: New task state (UNRESOLVED or RESOLVED)
+            workspace: Workspace name (defaults to self.workspace)
+
+        Returns:
+            Updated task object
+        """
+        ws = workspace or self.workspace
+        payload: Dict[str, Any] = {}
+        if content is not None:
+            payload["content"] = {"raw": content}
+        if state is not None:
+            payload["state"] = state
+        response = await self.client.put(
+            f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}/tasks/{task_id}",
+            json=payload
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def delete_pull_request_task(
+        self,
+        repo_slug: str,
+        pull_request_id: str,
+        task_id: str,
+        workspace: Optional[str] = None
+    ) -> None:
+        """
+        Delete a pull request task.
+
+        Args:
+            repo_slug: Repository slug
+            pull_request_id: Pull request ID
+            task_id: Task ID
+            workspace: Workspace name (defaults to self.workspace)
+        """
+        ws = workspace or self.workspace
+        response = await self.client.delete(
+            f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}/tasks/{task_id}"
+        )
+        response.raise_for_status()
+
+    # ========== PR Patch ==========
+
+    async def get_pull_request_patch(
         self,
         repo_slug: str,
         pull_request_id: str,
         workspace: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Get the patch for a pull request.
+
+        Args:
+            repo_slug: Repository slug
+            pull_request_id: Pull request ID
+            workspace: Workspace name (defaults to self.workspace)
+
+        Returns:
+            Dictionary with patch content as string
+        """
+        ws = workspace or self.workspace
+        response = await self.client.get(
+            f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}/patch",
+            follow_redirects=True
+        )
+        response.raise_for_status()
+        return {"patch": response.text}
+
+    # ========== PR Discovery ==========
+
+    async def get_pull_requests_pending_review(
+        self,
+        repo_slug: str,
+        workspace: Optional[str] = None,
+        page_size: int = 30,
+        max_pages: Optional[int] = 1
+    ) -> Dict[str, Any]:
+        """
+        Get open pull requests where the current user is a reviewer.
+
+        Args:
+            repo_slug: Repository slug
+            workspace: Workspace name (defaults to self.workspace)
+            page_size: Items per page (default: 30)
+            max_pages: Maximum pages to fetch (default: 1)
+
+        Returns:
+            Paginated list of pull requests pending review
+        """
+        ws = workspace or self.workspace
+        config = PaginationConfig(page_size=page_size, max_pages=max_pages)
+        params = {"state": "OPEN", "role": "REVIEWER"}
+        return await aggregate_pages(
+            self.client,
+            f"/repositories/{ws}/{repo_slug}/pullrequests",
+            params,
+            config
+        )
+
+    async def get_pull_request_diff(
+        self,
+        repo_slug: str,
+        pull_request_id: str,
+        workspace: Optional[str] = None,
+        path: Optional[str] = None
     ) -> str:
         """
         Get the unified diff for a pull request.
@@ -655,13 +861,19 @@ class BitbucketClient:
             repo_slug: Repository slug
             pull_request_id: Pull request ID
             workspace: Workspace name (defaults to self.workspace)
+            path: Filter diff to a specific file path (optional)
 
         Returns:
             Unified diff as string
         """
         ws = workspace or self.workspace
+        params = {}
+        if path:
+            params["path"] = path
         response = await self.client.get(
-            f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}/diff"
+            f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}/diff",
+            params=params,
+            follow_redirects=True
         )
         response.raise_for_status()
         return response.text
