@@ -108,19 +108,26 @@ security add-generic-password -s "bitbucket-mcp" -a "bitbucket_workspace" -w "wo
 - **Method**: Basic Auth (`Authorization: Basic base64(email:token)`)
 - **API Base**: `https://api.bitbucket.org/2.0`
 
-### MCP Tools (32 total)
+### MCP Tools (39 total)
 
 | Category | Tools |
 |----------|-------|
 | **Repositories** | `list_repositories`, `get_repository` |
 | **Pull Requests** | `get_pull_requests`, `get_pull_request`, `create_pull_request`, `update_pull_request`, `approve_pull_request`, `unapprove_pull_request`, `request_changes_pull_request`, `unrequest_changes_pull_request`, `decline_pull_request`, `merge_pull_request` |
 | **Comments** | `get_pull_request_comments`, `add_pull_request_comment`, `get_pull_request_comment`, `update_pull_request_comment`, `delete_pull_request_comment`, `resolve_pull_request_comment`, `reopen_pull_request_comment`, `get_pull_request_activity` |
-| **Diff / Review** | `get_pull_request_diff`, `get_pull_request_diffstat`, `get_pull_request_commits` |
+| **Tasks PR** | `get_pull_request_tasks`, `get_pull_request_task`, `create_pull_request_task`, `update_pull_request_task`, `delete_pull_request_task` |
+| **Diff / Review** | `get_pull_request_diff`, `get_pull_request_patch`, `get_pull_request_diffstat`, `get_pull_request_commits` |
+| **PR Discovery** | `get_pull_requests_pending_review` |
 | **Build / CI** | `get_pull_request_statuses`, `get_commit_statuses` |
 | **Pipelines** | `list_pipeline_runs`, `get_pipeline_run`, `get_pipeline_steps`, `get_pipeline_step_logs`, `run_pipeline`, `stop_pipeline` |
 | **Reviewers** | `get_effective_default_reviewers` |
 
-**Disabled by default**: `merge_pull_request` (safety), `stop_pipeline` (safety)
+**Disabled by default**: `merge_pull_request` (safety), `stop_pipeline` (safety), `get_pull_request_patch` (git am format — use `get_pull_request_diff` for AI review)
+
+> **Token tip** — `get_pull_request_diff` accepts an optional `path` parameter to filter the diff to a single file, reducing token usage by ~95% on large PRs:
+> ```python
+> get_pull_request_diff(repo_slug="my-repo", pull_request_id="42", path="src/services/myService.ts")
+> ```
 
 ### Pagination
 
@@ -252,6 +259,7 @@ Then: `git tag vX.Y.Z && git push origin vX.Y.Z` → GitHub Actions handles the 
 
 ## Recent Changes
 
+- Added 7 Phase 2 tools — Tasks PR CRUD, `get_pull_request_patch` (disabled by default), `get_pull_requests_pending_review`, `path` filter on `get_pull_request_diff` (v2.0.0)
 - Added 8 Phase 1 Quick Wins tools — comment CRUD, run/stop pipeline, effective default reviewers (v1.9.0)
 - Automated MCP Registry publish in release pipeline — `publish-mcp-registry` job (v1.8.1)
 - Added `/release` Claude Code skill for orchestrating the full release workflow (v1.8.1)
