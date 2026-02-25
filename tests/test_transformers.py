@@ -871,13 +871,16 @@ class TestSlimReviewer:
         from src.utils.transformers import slim_reviewer
 
         reviewer = {
-            "display_name": "John Doe",
-            "nickname": "jdoe",
-            "uuid": "{abc-123}",
-            "reviewer_type": "user",
-            "type": "user",
-            "links": {"self": {"href": "https://..."}},
-            "account_id": "123456",
+            "type": "default_reviewer",
+            "reviewer_type": "repository",
+            "user": {
+                "display_name": "John Doe",
+                "nickname": "jdoe",
+                "uuid": "{abc-123}",
+                "type": "user",
+                "links": {"self": {"href": "https://..."}},
+                "account_id": "123456",
+            },
         }
 
         result = slim_reviewer(reviewer)
@@ -886,5 +889,5 @@ class TestSlimReviewer:
             "display_name": "John Doe",
             "nickname": "jdoe",
             "uuid": "{abc-123}",
-            "type": "user",
+            "reviewer_type": "repository",
         }
