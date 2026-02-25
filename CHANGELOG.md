@@ -1,5 +1,19 @@
 # Changelog - Bitbucket MCP Server Python
 
+## [Unreleased]
+
+### Added
+- `get_pull_request_comment` — get a single PR comment by ID
+- `update_pull_request_comment` — edit comment content
+- `delete_pull_request_comment` — delete a PR comment
+- `resolve_pull_request_comment` — mark a comment as resolved
+- `reopen_pull_request_comment` — reopen a resolved comment
+- `run_pipeline` — trigger a pipeline on a branch
+- `stop_pipeline` — stop a running pipeline (disabled by default)
+- `get_effective_default_reviewers` — list effective default reviewers for a repo
+
+---
+
 ## [1.8.1] - 2026-02-24
 
 ### Added

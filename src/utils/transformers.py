@@ -324,3 +324,21 @@ def slim_pipeline_step(step: Dict[str, Any]) -> Dict[str, Any]:
 def slim_pipeline_step_list(data: Dict[str, Any]) -> Dict[str, Any]:
     """Slim a paginated list of pipeline steps."""
     return _slim_paginated(data, slim_pipeline_step)
+
+
+# ========== Default Reviewers ==========
+
+def slim_reviewer(reviewer: Dict[str, Any]) -> Dict[str, Any]:
+    """Slim a single default reviewer."""
+    user = reviewer.get("user", {})
+    return {
+        "display_name": user.get("display_name"),
+        "nickname": user.get("nickname"),
+        "uuid": user.get("uuid"),
+        "reviewer_type": reviewer.get("reviewer_type"),
+    }
+
+
+def slim_reviewer_list(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Slim a paginated list of default reviewers."""
+    return _slim_paginated(data, slim_reviewer)

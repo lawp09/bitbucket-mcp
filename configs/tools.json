@@ -50,7 +50,7 @@
         "description": "Decline a pull request"
       },
       "merge_pull_request": {
-        "enabled": true,
+        "enabled": false,
         "description": "Merge a pull request"
       },
       "get_pull_request_comments": {
@@ -60,6 +60,26 @@
       "add_pull_request_comment": {
         "enabled": true,
         "description": "Add a comment to a pull request"
+      },
+      "get_pull_request_comment": {
+        "enabled": true,
+        "description": "Get a specific comment on a pull request"
+      },
+      "update_pull_request_comment": {
+        "enabled": true,
+        "description": "Update a comment on a pull request"
+      },
+      "delete_pull_request_comment": {
+        "enabled": true,
+        "description": "Delete a comment on a pull request"
+      },
+      "resolve_pull_request_comment": {
+        "enabled": true,
+        "description": "Resolve a comment on a pull request"
+      },
+      "reopen_pull_request_comment": {
+        "enabled": true,
+        "description": "Reopen a resolved comment on a pull request"
       },
       "get_pull_request_diff": {
         "enabled": true,
@@ -104,6 +124,20 @@
       "get_pipeline_step_logs": {
         "enabled": true,
         "description": "Get logs for a specific pipeline step"
+      },
+      "run_pipeline": {
+        "enabled": true,
+        "description": "Trigger a new pipeline run on a branch"
+      },
+      "stop_pipeline": {
+        "enabled": false,
+        "description": "Stop a running pipeline"
+      }
+    },
+    "reviewers": {
+      "get_effective_default_reviewers": {
+        "enabled": true,
+        "description": "Get effective default reviewers for a repository"
       }
     }
   }

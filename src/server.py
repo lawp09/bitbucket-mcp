@@ -19,6 +19,7 @@ from .utils.transformers import (
     slim_activity_list,
     slim_pipeline_run, slim_pipeline_run_list,
     slim_pipeline_step_list,
+    slim_reviewer_list,
 )
 
 # Configuration logging vers stderr uniquement (container-friendly)
@@ -555,6 +556,137 @@ async def add_pull_request_comment(
 
 
 @conditional_tool()
+async def get_pull_request_comment(
+    repo_slug: str,
+    pull_request_id: str,
+    comment_id: str,
+    workspace: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Get a specific comment on a pull request.
+
+    Args:
+        repo_slug: Repository slug
+        pull_request_id: Pull request ID
+        comment_id: Comment ID
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Comment details with resolution status
+    """
+    client = get_client()
+    result = await client.get_pull_request_comment(
+        repo_slug, pull_request_id, comment_id, workspace
+    )
+    return slim_comment(_enrich_comment_with_resolution(result))
+
+
+@conditional_tool()
+async def update_pull_request_comment(
+    repo_slug: str,
+    pull_request_id: str,
+    comment_id: str,
+    content: str,
+    workspace: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Update a comment on a pull request.
+
+    Args:
+        repo_slug: Repository slug
+        pull_request_id: Pull request ID
+        comment_id: Comment ID
+        content: New comment content in markdown format
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Updated comment details
+    """
+    client = get_client()
+    result = await client.update_pull_request_comment(
+        repo_slug, pull_request_id, comment_id, content, workspace
+    )
+    return slim_comment(_enrich_comment_with_resolution(result))
+
+
+@conditional_tool()
+async def delete_pull_request_comment(
+    repo_slug: str,
+    pull_request_id: str,
+    comment_id: str,
+    workspace: Optional[str] = None
+) -> str:
+    """
+    Delete a comment on a pull request.
+
+    Args:
+        repo_slug: Repository slug
+        pull_request_id: Pull request ID
+        comment_id: Comment ID
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Success message
+    """
+    client = get_client()
+    await client.delete_pull_request_comment(
+        repo_slug, pull_request_id, comment_id, workspace
+    )
+    return "Comment deleted successfully"
+
+
+@conditional_tool()
+async def resolve_pull_request_comment(
+    repo_slug: str,
+    pull_request_id: str,
+    comment_id: str,
+    workspace: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Resolve a comment on a pull request.
+
+    Args:
+        repo_slug: Repository slug
+        pull_request_id: Pull request ID
+        comment_id: Comment ID
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Resolution details
+    """
+    client = get_client()
+    return await client.resolve_pull_request_comment(
+        repo_slug, pull_request_id, comment_id, workspace
+    )
+
+
+@conditional_tool()
+async def reopen_pull_request_comment(
+    repo_slug: str,
+    pull_request_id: str,
+    comment_id: str,
+    workspace: Optional[str] = None
+) -> str:
+    """
+    Reopen (unresolve) a comment on a pull request.
+
+    Args:
+        repo_slug: Repository slug
+        pull_request_id: Pull request ID
+        comment_id: Comment ID
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Success message
+    """
+    client = get_client()
+    await client.reopen_pull_request_comment(
+        repo_slug, pull_request_id, comment_id, workspace
+    )
+    return "Comment reopened successfully"
+
+
+@conditional_tool()
 async def get_pull_request_diff(
     repo_slug: str,
     pull_request_id: str,
@@ -873,3 +1005,78 @@ async def get_pipeline_step_logs(
     return await client.get_pipeline_step_logs(
         repo_slug, pipeline_uuid, step_uuid, workspace
     )
+
+
+@conditional_tool()
+async def run_pipeline(
+    repo_slug: str,
+    branch: str,
+    workspace: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Trigger a new pipeline run on a branch.
+
+    Args:
+        repo_slug: Repository slug
+        branch: Branch name to run the pipeline on
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Created pipeline run details
+    """
+    client = get_client()
+    result = await client.run_pipeline(repo_slug, branch, workspace)
+    return slim_pipeline_run(result)
+
+
+@conditional_tool()
+async def stop_pipeline(
+    repo_slug: str,
+    pipeline_uuid: str,
+    workspace: Optional[str] = None
+) -> str:
+    """
+    Stop a running pipeline.
+
+    Args:
+        repo_slug: Repository slug
+        pipeline_uuid: Pipeline UUID to stop
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Success message
+    """
+    client = get_client()
+    await client.stop_pipeline(repo_slug, pipeline_uuid, workspace)
+    return "Pipeline stopped successfully"
+
+
+# ========== Default Reviewers Tools ==========
+
+@conditional_tool()
+async def get_effective_default_reviewers(
+    repo_slug: str,
+    workspace: Optional[str] = None,
+    page_size: int = 30,
+    max_pages: Optional[int] = 1
+) -> Dict[str, Any]:
+    """
+    Get effective default reviewers for a repository.
+
+    Args:
+        repo_slug: Repository slug
+        workspace: Workspace name (optional, defaults to configured workspace)
+        page_size: Items per page (default: 30)
+        max_pages: Maximum pages to fetch (default: 1, max recommended: 10)
+
+    Returns:
+        List of default reviewers for the repository
+
+    Note:
+        Fetching more than 10 pages or 300 items will trigger a warning.
+    """
+    client = get_client()
+    result = await client.get_effective_default_reviewers(
+        repo_slug, workspace, page_size, max_pages
+    )
+    return slim_reviewer_list(result)
