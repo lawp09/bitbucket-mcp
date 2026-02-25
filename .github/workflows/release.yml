@@ -114,7 +114,7 @@ jobs:
           MCP_GITHUB_TOKEN: ${{ secrets.MCP_GITHUB_TOKEN }}
         run: |
           mcp-publisher login github
-          mcp-publisher publish server.json
+          mcp-publisher publish server.json || echo "::warning::MCP Registry publish skipped (version may already exist)"
 
   github-release:
     needs: [publish-pypi, publish-mcp-registry]
