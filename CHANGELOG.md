@@ -1,6 +1,6 @@
 # Changelog - Bitbucket MCP Server Python
 
-## [Unreleased]
+## [1.9.0] - 2026-02-25
 
 ### Added
 - `get_pull_request_comment` — get a single PR comment by ID
@@ -11,6 +11,10 @@
 - `run_pipeline` — trigger a pipeline on a branch
 - `stop_pipeline` — stop a running pipeline (disabled by default)
 - `get_effective_default_reviewers` — list effective default reviewers for a repo
+
+### Fixed
+- `slim_reviewer` transformer now reads user fields from nested `user` object (API structure)
+- `delete_pull_request_comment` tool enabled by default in `configs/tools.json`
 
 ---
 

@@ -108,18 +108,19 @@ security add-generic-password -s "bitbucket-mcp" -a "bitbucket_workspace" -w "wo
 - **Method**: Basic Auth (`Authorization: Basic base64(email:token)`)
 - **API Base**: `https://api.bitbucket.org/2.0`
 
-### MCP Tools (24 total)
+### MCP Tools (32 total)
 
 | Category | Tools |
 |----------|-------|
 | **Repositories** | `list_repositories`, `get_repository` |
 | **Pull Requests** | `get_pull_requests`, `get_pull_request`, `create_pull_request`, `update_pull_request`, `approve_pull_request`, `unapprove_pull_request`, `request_changes_pull_request`, `unrequest_changes_pull_request`, `decline_pull_request`, `merge_pull_request` |
-| **Comments** | `get_pull_request_comments`, `add_pull_request_comment`, `get_pull_request_activity` |
+| **Comments** | `get_pull_request_comments`, `add_pull_request_comment`, `get_pull_request_comment`, `update_pull_request_comment`, `delete_pull_request_comment`, `resolve_pull_request_comment`, `reopen_pull_request_comment`, `get_pull_request_activity` |
 | **Diff / Review** | `get_pull_request_diff`, `get_pull_request_diffstat`, `get_pull_request_commits` |
 | **Build / CI** | `get_pull_request_statuses`, `get_commit_statuses` |
-| **Pipelines** | `list_pipeline_runs`, `get_pipeline_run`, `get_pipeline_steps`, `get_pipeline_step_logs` |
+| **Pipelines** | `list_pipeline_runs`, `get_pipeline_run`, `get_pipeline_steps`, `get_pipeline_step_logs`, `run_pipeline`, `stop_pipeline` |
+| **Reviewers** | `get_effective_default_reviewers` |
 
-**Disabled by default**: `merge_pull_request` (safety)
+**Disabled by default**: `merge_pull_request` (safety), `stop_pipeline` (safety)
 
 ### Pagination
 
@@ -251,6 +252,7 @@ Then: `git tag vX.Y.Z && git push origin vX.Y.Z` → GitHub Actions handles the 
 
 ## Recent Changes
 
+- Added 8 Phase 1 Quick Wins tools — comment CRUD, run/stop pipeline, effective default reviewers (v1.9.0)
 - Automated MCP Registry publish in release pipeline — `publish-mcp-registry` job (v1.8.1)
 - Added `/release` Claude Code skill for orchestrating the full release workflow (v1.8.1)
 - Added `request_changes_pull_request` and `unrequest_changes_pull_request` tools (v1.8.0)
