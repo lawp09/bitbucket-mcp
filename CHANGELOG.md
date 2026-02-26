@@ -1,6 +1,6 @@
 # Changelog - Bitbucket MCP Server Python
 
-## [Unreleased]
+## [1.11.0] - 2026-02-26
 
 ### Added
 - `create_draft_pull_request` — create a pull request in draft state (alias for `create_pull_request(draft=True)`)
