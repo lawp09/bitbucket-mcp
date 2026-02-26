@@ -108,7 +108,7 @@ security add-generic-password -s "bitbucket-mcp" -a "bitbucket_workspace" -w "wo
 - **Method**: Basic Auth (`Authorization: Basic base64(email:token)`)
 - **API Base**: `https://api.bitbucket.org/2.0`
 
-### MCP Tools (39 total)
+### MCP Tools (45 total)
 
 | Category | Tools |
 |----------|-------|
@@ -120,9 +120,12 @@ security add-generic-password -s "bitbucket-mcp" -a "bitbucket_workspace" -w "wo
 | **PR Discovery** | `get_pull_requests_pending_review` |
 | **Build / CI** | `get_pull_request_statuses`, `get_commit_statuses` |
 | **Pipelines** | `list_pipeline_runs`, `get_pipeline_run`, `get_pipeline_steps`, `get_pipeline_step_logs`, `run_pipeline`, `stop_pipeline` |
-| **Reviewers** | `get_effective_default_reviewers` |
+| **Reviewers** | `get_effective_default_reviewers`, `suggest_pull_request_reviewers` |
+| **Draft PR** | `create_draft_pull_request`, `publish_draft_pull_request`, `convert_pull_request_to_draft` |
+| **Batch Review** | `submit_pull_request_batch_review` |
+| **Review Summary** | `get_pull_request_review_summary` |
 
-**Disabled by default**: `merge_pull_request` (safety), `stop_pipeline` (safety), `get_pull_request_patch` (git am format — use `get_pull_request_diff` for AI review)
+**Disabled by default**: `merge_pull_request` (safety), `stop_pipeline` (safety), `get_pull_request_patch` (git am format — use `get_pull_request_diff` for AI review), `convert_pull_request_to_draft` (not supported by Bitbucket API)
 
 > **Token tip** — `get_pull_request_diff` accepts an optional `path` parameter to filter the diff to a single file, reducing token usage by ~95% on large PRs:
 > ```python
@@ -259,7 +262,8 @@ Then: `git tag vX.Y.Z && git push origin vX.Y.Z` → GitHub Actions handles the 
 
 ## Recent Changes
 
-- Added 7 Phase 2 tools — Tasks PR CRUD, `get_pull_request_patch` (disabled by default), `get_pull_requests_pending_review`, `path` filter on `get_pull_request_diff` (v2.0.0)
+- Added 6 tools — `create_draft_pull_request`, `publish_draft_pull_request`, `convert_pull_request_to_draft` (disabled), `submit_pull_request_batch_review`, `get_pull_request_review_summary`, `suggest_pull_request_reviewers`; fix `create_pull_request` draft payload (`draft: true` vs `state: "DRAFT"`)
+- Added 7 tools — Tasks PR CRUD, `get_pull_request_patch` (disabled by default), `get_pull_requests_pending_review`, `path` filter on `get_pull_request_diff` (v2.0.0)
 - Added 8 Phase 1 Quick Wins tools — comment CRUD, run/stop pipeline, effective default reviewers (v1.9.0)
 - Automated MCP Registry publish in release pipeline — `publish-mcp-registry` job (v1.8.1)
 - Added `/release` Claude Code skill for orchestrating the full release workflow (v1.8.1)
