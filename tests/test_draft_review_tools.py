@@ -1,4 +1,4 @@
-"""Functional tests for Phase 3 MCP tools."""
+"""Tests for draft PR, batch review, and reviewer suggestion tools."""
 
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock

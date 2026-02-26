@@ -1281,7 +1281,7 @@ async def get_effective_default_reviewers(
     return slim_reviewer_list(result)
 
 
-# ========== Phase 3 Draft PR Tools ==========
+# ========== Draft PR Tools ==========
 
 @conditional_tool()
 async def create_draft_pull_request(
@@ -1371,7 +1371,7 @@ async def convert_pull_request_to_draft(
     }
 
 
-# ========== Phase 3 Batch Review Tools ==========
+# ========== Batch Review Tools ==========
 
 @conditional_tool()
 async def submit_pull_request_batch_review(
@@ -1460,7 +1460,7 @@ async def submit_pull_request_batch_review(
     return result
 
 
-# ========== Phase 3 Review Summary & Reviewer Suggestion Tools ==========
+# ========== Review Summary & Reviewer Suggestion Tools ==========
 
 @conditional_tool()
 async def get_pull_request_review_summary(
