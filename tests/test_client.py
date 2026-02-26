@@ -133,3 +133,12 @@ def test_phase2_methods_exist():
     for method in methods:
         assert hasattr(client, method), f"Missing method: {method}"
         assert callable(getattr(client, method)), f"Not callable: {method}"
+
+
+def test_phase3_methods_exist():
+    """Test that Phase 3 methods are present in the client"""
+    client = BitbucketClient("test@example.com", "token", "workspace")
+    methods = ["publish_draft_pull_request"]
+    for method in methods:
+        assert hasattr(client, method), f"Missing method: {method}"
+        assert callable(getattr(client, method)), f"Not callable: {method}"

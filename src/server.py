@@ -1,5 +1,6 @@
 """MCP Server for Bitbucket API"""
 
+import asyncio
 import os
 import sys
 import json
@@ -12,9 +13,9 @@ from .utils.credentials import get_credentials
 from .utils.transformers import (
     slim_repository, slim_repository_list,
     slim_pull_request, slim_pull_request_list, slim_pull_request_created,
-    slim_status_list,
+    slim_status, slim_status_list,
     slim_commit_list,
-    slim_diffstat_list,
+    slim_diffstat_entry, slim_diffstat_list,
     slim_comment, slim_comment_list,
     slim_activity_list,
     slim_pipeline_run, slim_pipeline_run_list,
@@ -1278,3 +1279,349 @@ async def get_effective_default_reviewers(
         repo_slug, workspace, page_size, max_pages
     )
     return slim_reviewer_list(result)
+
+
+# ========== Phase 3 Draft PR Tools ==========
+
+@conditional_tool()
+async def create_draft_pull_request(
+    repo_slug: str,
+    title: str,
+    description: str,
+    source_branch: str,
+    target_branch: str,
+    workspace: Optional[str] = None,
+    reviewers: Optional[list] = None
+) -> Dict[str, Any]:
+    """
+    Create a new pull request as draft. Draft PRs are not ready for review.
+
+    Args:
+        repo_slug: Repository slug
+        title: Pull request title
+        description: Pull request description
+        source_branch: Source branch name
+        target_branch: Target branch name
+        workspace: Workspace name (optional, defaults to configured workspace)
+        reviewers: List of reviewer UUIDs (optional)
+
+    Returns:
+        Created draft pull request details
+    """
+    client = get_client()
+    result = await client.create_pull_request(
+        repo_slug, title, description, source_branch, target_branch,
+        workspace, reviewers, draft=True
+    )
+    return slim_pull_request_created(result)
+
+
+@conditional_tool()
+async def publish_draft_pull_request(
+    repo_slug: str,
+    pull_request_id: str,
+    workspace: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Publish a draft pull request (convert DRAFT to OPEN).
+
+    Args:
+        repo_slug: Repository slug
+        pull_request_id: Pull request ID
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Updated pull request details
+    """
+    client = get_client()
+    result = await client.publish_draft_pull_request(
+        repo_slug, pull_request_id, workspace
+    )
+    return slim_pull_request_created(result)
+
+
+@conditional_tool()
+async def convert_pull_request_to_draft(
+    repo_slug: str,
+    pull_request_id: str,
+    workspace: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Convert an open pull request to draft state.
+
+    Note: This operation is NOT supported by the Bitbucket Cloud API.
+    Bitbucket only supports creating PRs as drafts or publishing drafts to open.
+    Converting an open PR back to draft is only available in the Bitbucket web UI.
+
+    Args:
+        repo_slug: Repository slug
+        pull_request_id: Pull request ID
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Error message explaining the limitation
+    """
+    return {
+        "error": "Not supported by Bitbucket API",
+        "message": "Converting an open pull request to draft is not supported by the Bitbucket Cloud REST API. "
+                   "This operation is only available in the Bitbucket web UI. "
+                   "To work with drafts, create a new PR as draft using create_draft_pull_request.",
+        "pr_id": pull_request_id,
+        "repo_slug": repo_slug
+    }
+
+
+# ========== Phase 3 Batch Review Tools ==========
+
+@conditional_tool()
+async def submit_pull_request_batch_review(
+    repo_slug: str,
+    pull_request_id: str,
+    comments: list,
+    review_action: str = "comment_only",
+    review_message: Optional[str] = None,
+    workspace: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Submit a batch review on a pull request: post multiple comments and optionally approve or request changes.
+
+    Note: Bitbucket API does not support pending/draft comments in batch. Each comment is posted immediately.
+
+    Args:
+        repo_slug: Repository slug
+        pull_request_id: Pull request ID
+        comments: List of comment objects. Each comment has:
+            - content (str, required): Comment text in markdown
+            - inline (dict, optional): For inline comments: {"path": str, "to": int, "from": int}
+        review_action: Action after posting comments: "approve", "request_changes", or "comment_only" (default: "comment_only")
+        review_message: General review message posted as a top-level comment (optional)
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Summary with comments_posted count, action taken, and PR details
+    """
+    if review_action not in ("approve", "request_changes", "comment_only"):
+        raise ValueError(f"Invalid review_action '{review_action}'. Must be 'approve', 'request_changes', or 'comment_only'")
+
+    client = get_client()
+    comments_posted = 0
+    failed_comments = []
+
+    # Post review message as top-level comment if provided
+    if review_message:
+        try:
+            await client.add_pull_request_comment(
+                repo_slug, pull_request_id, review_message, workspace
+            )
+            comments_posted += 1
+        except Exception as e:
+            failed_comments.append({"index": "review_message", "error": str(e)})
+
+    # Post each comment sequentially (best-effort)
+    for i, comment in enumerate(comments):
+        content = comment.get("content", "")
+        inline = comment.get("inline")
+
+        inline_path = None
+        inline_from = None
+        inline_to = None
+        if inline:
+            inline_path = inline.get("path")
+            inline_from = inline.get("from")
+            inline_to = inline.get("to")
+
+        try:
+            await client.add_pull_request_comment(
+                repo_slug, pull_request_id, content, workspace,
+                inline_path=inline_path, inline_from=inline_from, inline_to=inline_to
+            )
+            comments_posted += 1
+        except Exception as e:
+            failed_comments.append({"index": i, "error": str(e)})
+
+    # Execute review action
+    if review_action == "approve":
+        await client.approve_pull_request(repo_slug, pull_request_id, workspace)
+    elif review_action == "request_changes":
+        await client.request_changes_pull_request(repo_slug, pull_request_id, workspace)
+
+    # Get updated PR data
+    pr_data = await client.get_pull_request(repo_slug, pull_request_id, workspace)
+
+    result = {
+        "comments_posted": comments_posted,
+        "action": review_action,
+        "pr": slim_pull_request(pr_data)
+    }
+    if failed_comments:
+        result["failed_comments"] = failed_comments
+        result["partial_failure"] = True
+
+    return result
+
+
+# ========== Phase 3 Review Summary & Reviewer Suggestion Tools ==========
+
+@conditional_tool()
+async def get_pull_request_review_summary(
+    repo_slug: str,
+    pull_request_id: str,
+    workspace: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Get a comprehensive review summary for a pull request.
+
+    Aggregates PR details, diffstat, unresolved comments, and CI statuses in parallel
+    for efficient AI-assisted code review.
+
+    Args:
+        repo_slug: Repository slug
+        pull_request_id: Pull request ID
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Structured summary with pr details, diffstat, unresolved comments, CI statuses, and review readiness assessment
+    """
+    client = get_client()
+
+    pr_data, diffstat_data, comments_data, statuses_data = await asyncio.gather(
+        client.get_pull_request(repo_slug, pull_request_id, workspace),
+        client.get_pull_request_diffstat(repo_slug, pull_request_id, workspace, page_size=100, max_pages=5),
+        client.get_pull_request_comments(repo_slug, pull_request_id, workspace, page_size=100, max_pages=5, unresolved_only=True),
+        client.get_pull_request_statuses(repo_slug, pull_request_id, workspace, page_size=100, max_pages=5),
+    )
+
+    diffstat_values = diffstat_data.get("values", [])
+    total_added = sum(f.get("lines_added", 0) for f in diffstat_values)
+    total_removed = sum(f.get("lines_removed", 0) for f in diffstat_values)
+    diffstat_summary = {
+        "files_changed": len(diffstat_values),
+        "lines_added": total_added,
+        "lines_removed": total_removed,
+        "files": [slim_diffstat_entry(f) for f in diffstat_values]
+    }
+
+    # Process unresolved comments (defensive filter in case API returns resolved ones)
+    unresolved_comments = [
+        slim_comment(_enrich_comment_with_resolution(c))
+        for c in comments_data.get("values", [])
+        if not c.get("resolution")
+    ]
+
+    ci_statuses = [slim_status(s) for s in statuses_data.get("values", [])]
+
+    is_draft = pr_data.get("state") == "DRAFT" or pr_data.get("draft") is True
+    has_unresolved = len(unresolved_comments) > 0
+    ci_failing = any(s.get("state") in ("FAILED", "ERROR", "STOPPED") for s in statuses_data.get("values", []))
+
+    if is_draft:
+        review_readiness = "draft"
+    elif ci_failing:
+        review_readiness = "ci_failing"
+    elif has_unresolved:
+        review_readiness = "has_unresolved_comments"
+    else:
+        review_readiness = "ready"
+
+    return {
+        "pr": slim_pull_request(pr_data),
+        "diffstat": diffstat_summary,
+        "unresolved_comments": unresolved_comments,
+        "ci_statuses": ci_statuses,
+        "review_readiness": review_readiness
+    }
+
+
+@conditional_tool()
+async def suggest_pull_request_reviewers(
+    repo_slug: str,
+    pull_request_id: str,
+    max_suggestions: int = 5,
+    workspace: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Suggest reviewers for a pull request based on default reviewers and recent PR history.
+
+    Combines default reviewers with frequent approvers from recently merged PRs to
+    suggest the most relevant reviewers.
+
+    Args:
+        repo_slug: Repository slug
+        pull_request_id: Pull request ID
+        max_suggestions: Maximum number of reviewer suggestions (default: 5)
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Suggested reviewers with scores and reasons, already-assigned reviewers, and data sources
+    """
+    client = get_client()
+
+    pr_data, default_reviewers_data, recent_prs_data = await asyncio.gather(
+        client.get_pull_request(repo_slug, pull_request_id, workspace),
+        client.get_effective_default_reviewers(repo_slug, workspace, page_size=30, max_pages=1),
+        client.get_pull_requests(repo_slug, workspace, state="MERGED", limit=20, max_pages=1),
+    )
+
+    pr_author = pr_data.get("author", {}).get("uuid")
+
+    already_assigned = [
+        {
+            "display_name": r.get("display_name") or r.get("user", {}).get("display_name"),
+            "uuid": r.get("uuid") or r.get("user", {}).get("uuid"),
+        }
+        for r in pr_data.get("reviewers", [])
+    ]
+    assigned_uuids = {r.get("uuid") for r in already_assigned}
+
+    reviewer_scores = {}
+    for r in default_reviewers_data.get("values", []):
+        user = r.get("user", {})
+        uuid = user.get("uuid")
+        if uuid and uuid != pr_author:
+            reviewer_scores[uuid] = {
+                "account_id": uuid,
+                "display_name": user.get("display_name"),
+                "score": 10,
+                "reason": "default_reviewer"
+            }
+
+    approver_counts = {}
+    for pr in recent_prs_data.get("values", []):
+        for participant in pr.get("participants", []):
+            if participant.get("approved"):
+                user = participant.get("user", {})
+                uuid = user.get("uuid")
+                if uuid and uuid != pr_author:
+                    if uuid not in approver_counts:
+                        approver_counts[uuid] = {
+                            "display_name": user.get("display_name"),
+                            "count": 0
+                        }
+                    approver_counts[uuid]["count"] += 1
+
+    for uuid, data in approver_counts.items():
+        if uuid in reviewer_scores:
+            reviewer_scores[uuid]["score"] += data["count"]
+            reviewer_scores[uuid]["reason"] = "default_reviewer+frequent_approver"
+        else:
+            reviewer_scores[uuid] = {
+                "account_id": uuid,
+                "display_name": data["display_name"],
+                "score": data["count"],
+                "reason": "frequent_approver"
+            }
+
+    suggestions = sorted(
+        [r for r in reviewer_scores.values() if r["account_id"] not in assigned_uuids],
+        key=lambda x: x["score"],
+        reverse=True
+    )[:max_suggestions]
+
+    return {
+        "suggested_reviewers": suggestions,
+        "already_assigned": already_assigned,
+        "source": {
+            "default_reviewers": len(default_reviewers_data.get("values", [])),
+            "historical_approvers": len(approver_counts)
+        }
+    }

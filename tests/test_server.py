@@ -97,6 +97,13 @@ async def test_mcp_server_tools_registered():
     assert "delete_pull_request_task" in tool_names
     assert "get_pull_request_patch" not in tool_names  # disabled by default (git am format)
     assert "get_pull_requests_pending_review" in tool_names
+    # Phase 3 tools
+    assert "create_draft_pull_request" in tool_names
+    assert "publish_draft_pull_request" in tool_names
+    assert "convert_pull_request_to_draft" not in tool_names  # disabled (API not supported)
+    assert "submit_pull_request_batch_review" in tool_names
+    assert "get_pull_request_review_summary" in tool_names
+    assert "suggest_pull_request_reviewers" in tool_names
 
 
 @pytest.mark.asyncio

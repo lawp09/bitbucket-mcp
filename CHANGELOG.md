@@ -1,5 +1,20 @@
 # Changelog - Bitbucket MCP Server Python
 
+## [Unreleased]
+
+### Added
+- `create_draft_pull_request` — create a pull request in draft state (alias for `create_pull_request(draft=True)`)
+- `publish_draft_pull_request` — publish a draft PR to open state (`PUT` with `{"draft": false}`)
+- `convert_pull_request_to_draft` — disabled (not supported by Bitbucket Cloud API, returns descriptive error)
+- `submit_pull_request_batch_review` — post N inline/top-level comments + approve or request_changes in one operation
+- `get_pull_request_review_summary` — composite tool: PR + diffstat + unresolved comments + CI statuses via `asyncio.gather`, returns `review_readiness` assessment
+- `suggest_pull_request_reviewers` — combine default reviewers with historical approver scoring to rank best reviewers
+
+### Fixed
+- `create_pull_request` — fix draft payload: use `{"draft": true}` instead of `{"state": "DRAFT"}` (Bitbucket API v2 convention)
+
+---
+
 ## [1.10.1] - 2026-02-25
 
 ### Fixed
