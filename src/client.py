@@ -221,7 +221,7 @@ class BitbucketClient:
             payload["reviewers"] = [{"uuid": r} for r in reviewers]
 
         if draft:
-            payload["state"] = "DRAFT"
+            payload["draft"] = True
 
         response = await self.client.post(
             f"/repositories/{ws}/{repo_slug}/pullrequests",
@@ -1310,3 +1310,28 @@ class BitbucketClient:
                 {},
                 config
             )
+
+    async def publish_draft_pull_request(
+        self,
+        repo_slug: str,
+        pull_request_id: str,
+        workspace: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Publish a draft pull request (convert DRAFT to OPEN).
+
+        Args:
+            repo_slug: Repository slug
+            pull_request_id: Pull request ID
+            workspace: Workspace name (defaults to self.workspace)
+
+        Returns:
+            Updated pull request details
+        """
+        ws = workspace or self.workspace
+        response = await self.client.put(
+            f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}",
+            json={"draft": False}
+        )
+        response.raise_for_status()
+        return response.json()

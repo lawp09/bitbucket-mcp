@@ -96,8 +96,8 @@ def test_request_changes_methods_exist():
     assert callable(getattr(client, "unrequest_changes_pull_request"))
 
 
-def test_phase1_quick_wins_methods_exist():
-    """Test that Phase 1 Quick Wins methods are present in the client"""
+def test_comment_pipeline_reviewer_methods_exist():
+    """Test that comment CRUD, pipeline, and reviewer methods are present in the client"""
     client = BitbucketClient("test@example.com", "token", "workspace")
 
     methods = [
@@ -116,8 +116,8 @@ def test_phase1_quick_wins_methods_exist():
         assert callable(getattr(client, method)), f"Not callable: {method}"
 
 
-def test_phase2_methods_exist():
-    """Test that Phase 2 methods are present in the client"""
+def test_task_and_diff_methods_exist():
+    """Test that PR task and diff methods are present in the client"""
     client = BitbucketClient("test@example.com", "token", "workspace")
 
     methods = [
@@ -130,6 +130,15 @@ def test_phase2_methods_exist():
         "get_pull_requests_pending_review",
     ]
 
+    for method in methods:
+        assert hasattr(client, method), f"Missing method: {method}"
+        assert callable(getattr(client, method)), f"Not callable: {method}"
+
+
+def test_draft_pr_methods_exist():
+    """Test that draft PR methods are present in the client"""
+    client = BitbucketClient("test@example.com", "token", "workspace")
+    methods = ["publish_draft_pull_request"]
     for method in methods:
         assert hasattr(client, method), f"Missing method: {method}"
         assert callable(getattr(client, method)), f"Not callable: {method}"
