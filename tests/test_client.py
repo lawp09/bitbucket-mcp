@@ -142,3 +142,12 @@ def test_draft_pr_methods_exist():
     for method in methods:
         assert hasattr(client, method), f"Missing method: {method}"
         assert callable(getattr(client, method)), f"Not callable: {method}"
+
+
+def test_create_pull_request_task_accepts_comment_id():
+    import inspect
+    client = BitbucketClient("test@example.com", "token", "workspace")
+    sig = inspect.signature(client.create_pull_request_task)
+    assert "comment_id" in sig.parameters
+    param = sig.parameters["comment_id"]
+    assert param.default is None

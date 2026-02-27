@@ -1,5 +1,12 @@
 # Changelog - Bitbucket MCP Server Python
 
+## [Unreleased]
+
+### Changed
+- `create_pull_request_task` — add optional `comment_id` parameter to link a task to a specific PR comment; backward compatible (defaults to `None`)
+
+---
+
 ## [1.11.0] - 2026-02-26
 
 ### Added

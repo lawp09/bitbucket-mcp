@@ -777,15 +777,17 @@ async def create_pull_request_task(
     repo_slug: str,
     pull_request_id: str,
     content: str,
+    comment_id: Optional[int] = None,
     workspace: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    Create a task on a pull request.
+    Create a task on a pull request, optionally linked to a specific comment.
 
     Args:
         repo_slug: Repository slug
         pull_request_id: Pull request ID
         content: Task content in markdown format
+        comment_id: Optional comment ID to link the task to a specific comment
         workspace: Workspace name (optional, defaults to configured workspace)
 
     Returns:
@@ -793,7 +795,7 @@ async def create_pull_request_task(
     """
     client = get_client()
     result = await client.create_pull_request_task(
-        repo_slug, pull_request_id, content, workspace
+        repo_slug, pull_request_id, content, comment_id, workspace
     )
     return slim_task(result)
 
