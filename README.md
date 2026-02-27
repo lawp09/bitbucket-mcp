@@ -54,7 +54,9 @@ Set the following environment variables (or use a `.env` file — see [Credentia
 | `BITBUCKET_TOKEN` | Your Bitbucket API token |
 | `BITBUCKET_WORKSPACE` | Your workspace slug |
 
-> Get your API token at: https://id.atlassian.com/manage-profile/security/api-tokens
+> **Get your API token** at: https://id.atlassian.com/manage-profile/security/api-tokens
+>
+> ⚠️ **Use a scoped token, not a global one.** When creating the token, select specific scopes (e.g. `Repositories: Read`, `Pull requests: Read/Write`). Global tokens without explicit scopes do not work with this MCP server.
 
 ### 3. Configure your AI assistant
 
