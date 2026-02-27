@@ -705,6 +705,7 @@ class BitbucketClient:
         repo_slug: str,
         pull_request_id: str,
         content: str,
+        comment_id: Optional[int] = None,
         workspace: Optional[str] = None
     ) -> Dict[str, Any]:
         """
@@ -714,6 +715,7 @@ class BitbucketClient:
             repo_slug: Repository slug
             pull_request_id: Pull request ID
             content: Task content (markdown)
+            comment_id: Optional comment ID to link the task to a specific comment
             workspace: Workspace name (defaults to self.workspace)
 
         Returns:
@@ -724,6 +726,8 @@ class BitbucketClient:
             "content": {"raw": content},
             "state": "UNRESOLVED"
         }
+        if comment_id is not None:
+            payload["comment"] = {"id": comment_id}
         response = await self.client.post(
             f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}/tasks",
             json=payload

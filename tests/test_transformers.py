@@ -929,6 +929,27 @@ class TestSlimTask:
         assert isinstance(result["content"], str)
         assert "html" not in str(result["content"])
 
+    def test_task_with_comment_id(self):
+        task_with_comment = {
+            **SAMPLE_TASK,
+            "comment": {"id": 760810168, "links": SAMPLE_LINKS},
+        }
+        result = slim_task(task_with_comment)
+        assert result["comment_id"] == 760810168
+
+    def test_task_without_comment_id(self):
+        result = slim_task(SAMPLE_TASK)
+        assert "comment_id" not in result
+
+    def test_task_with_comment_without_id(self):
+        """Edge case: comment dict present but missing id key."""
+        task_with_empty_comment = {
+            **SAMPLE_TASK,
+            "comment": {"links": SAMPLE_LINKS},
+        }
+        result = slim_task(task_with_empty_comment)
+        assert result["comment_id"] is None
+
 
 # ========== Default Reviewers Tests ==========
 

@@ -244,7 +244,8 @@ def slim_comment_list(data: Dict[str, Any]) -> Dict[str, Any]:
 def slim_task(task: Dict[str, Any]) -> Dict[str, Any]:
     """Slim a PR task response to reduce LLM token usage."""
     resolved_by = task.get("resolved_by")
-    return {
+    comment = task.get("comment")
+    result = {
         "id": task.get("id"),
         "state": task.get("state"),
         "content": task.get("content", {}).get("raw"),
@@ -255,6 +256,9 @@ def slim_task(task: Dict[str, Any]) -> Dict[str, Any]:
         "resolved_by": resolved_by.get("display_name") if resolved_by else None,
         "pending": task.get("pending", False),
     }
+    if comment:
+        result["comment_id"] = comment.get("id")
+    return result
 
 
 def slim_task_list(data: Dict[str, Any]) -> Dict[str, Any]:
