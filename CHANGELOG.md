@@ -1,6 +1,6 @@
 # Changelog - Bitbucket MCP Server Python
 
-## [Unreleased]
+## [1.13.0] - 2026-03-09
 
 ### Added
 - `update_pull_request` — add `reviewers` parameter (list of UUIDs); supports adding, replacing, or clearing reviewers (`[]` clears all)
