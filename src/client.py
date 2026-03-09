@@ -181,6 +181,11 @@ class BitbucketClient:
         response.raise_for_status()
         return response.json()
 
+    @staticmethod
+    def _normalize_reviewers(reviewers: list) -> list:
+        """Normalize reviewers to [{"uuid": "..."}] format, accepting both strings and dicts."""
+        return [r if isinstance(r, dict) else {"uuid": r} for r in reviewers]
+
     async def create_pull_request(
         self,
         repo_slug: str,
@@ -189,7 +194,7 @@ class BitbucketClient:
         source_branch: str,
         target_branch: str,
         workspace: Optional[str] = None,
-        reviewers: Optional[List[str]] = None,
+        reviewers: Optional[list] = None,
         draft: bool = False
     ) -> Dict[str, Any]:
         """
@@ -217,8 +222,8 @@ class BitbucketClient:
             "destination": {"branch": {"name": target_branch}}
         }
 
-        if reviewers:
-            payload["reviewers"] = [{"uuid": r} for r in reviewers]
+        if reviewers is not None:
+            payload["reviewers"] = self._normalize_reviewers(reviewers)
 
         if draft:
             payload["draft"] = True
@@ -261,7 +266,7 @@ class BitbucketClient:
         if description:
             payload["description"] = description
         if reviewers is not None:
-            payload["reviewers"] = [{"uuid": r} for r in reviewers]
+            payload["reviewers"] = self._normalize_reviewers(reviewers)
 
         response = await self.client.put(
             f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}",
