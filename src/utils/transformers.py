@@ -100,8 +100,8 @@ def slim_pull_request(pr: Dict[str, Any]) -> Dict[str, Any]:
         "destination_branch": destination.get("branch", {}).get("name"),
         "reviewers": [
             {
-                "display_name": r.get("user", {}).get("display_name"),
-                "uuid": r.get("user", {}).get("uuid"),
+                "display_name": r.get("display_name"),
+                "uuid": r.get("uuid"),
                 "approved": r.get("approved"),
             }
             for r in pr.get("reviewers", [])

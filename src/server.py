@@ -333,7 +333,10 @@ async def update_pull_request(
         workspace: Workspace name (optional, defaults to configured workspace)
         title: New pull request title (optional)
         description: New pull request description (optional)
-        reviewers: List of reviewer UUIDs (optional). Pass [] to clear all reviewers.
+        reviewers: Complete list of reviewer UUIDs to set on the PR (optional).
+            WARNING: this REPLACES the entire reviewer list — include all existing reviewers
+            you want to keep, plus any new ones. Use get_pull_request first to retrieve
+            current reviewer UUIDs. Pass [] to clear all reviewers.
 
     Returns:
         Updated pull request details

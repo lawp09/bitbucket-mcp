@@ -119,7 +119,7 @@ SAMPLE_PR = {
         "commit": {"hash": "789xyz000111", "links": SAMPLE_LINKS, "type": "commit"},
         "repository": {"type": "repository", "full_name": "villemontreal/my-api", "links": SAMPLE_LINKS},
     },
-    "reviewers": [{"user": SAMPLE_USER, "approved": False}],
+    "reviewers": [SAMPLE_USER],
     "participants": [
         {"user": SAMPLE_USER, "role": "REVIEWER", "approved": True, "type": "participant"},
     ],
