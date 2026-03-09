@@ -236,7 +236,8 @@ class BitbucketClient:
         pull_request_id: str,
         workspace: Optional[str] = None,
         title: Optional[str] = None,
-        description: Optional[str] = None
+        description: Optional[str] = None,
+        reviewers: Optional[list] = None
     ) -> Dict[str, Any]:
         """
         Update a pull request.
@@ -247,6 +248,7 @@ class BitbucketClient:
             workspace: Workspace name (defaults to self.workspace)
             title: New title
             description: New description
+            reviewers: List of reviewer UUIDs (optional)
 
         Returns:
             Updated pull request details
@@ -258,6 +260,8 @@ class BitbucketClient:
             payload["title"] = title
         if description:
             payload["description"] = description
+        if reviewers is not None:
+            payload["reviewers"] = [{"uuid": r} for r in reviewers]
 
         response = await self.client.put(
             f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}",

@@ -121,7 +121,7 @@ SAMPLE_PR = {
     },
     "reviewers": [SAMPLE_USER],
     "participants": [
-        {**SAMPLE_USER, "role": "REVIEWER", "approved": True},
+        {"user": SAMPLE_USER, "role": "REVIEWER", "approved": True, "type": "participant"},
     ],
     "links": {
         "self": {"href": "https://api.bitbucket.org/2.0/repositories/villemontreal/my-api/pullrequests/42"},
@@ -358,36 +358,43 @@ class TestSlimPullRequest:
         result = slim_pull_request(SAMPLE_PR)
         assert len(result["reviewers"]) == 1
         assert result["reviewers"][0]["display_name"] == "Philippe LAWSON"
+        assert result["reviewers"][0]["uuid"] == "{e7ae358e-abb2-4b2e-8e00-3976fa551c45}"
         assert "links" not in result["reviewers"][0]
-        assert "uuid" not in result["reviewers"][0]
 
     def test_slim_participants(self):
         result = slim_pull_request(SAMPLE_PR)
         assert len(result["participants"]) == 1
+        assert result["participants"][0]["display_name"] == "Philippe LAWSON"
+        assert result["participants"][0]["uuid"] == "{e7ae358e-abb2-4b2e-8e00-3976fa551c45}"
         assert result["participants"][0]["role"] == "REVIEWER"
         assert result["participants"][0]["approved"] is True
         assert "links" not in result["participants"][0]
 
-    def test_participant_display_name_fallback(self):
-        """Bitbucket puts display_name in participant.user, not participant itself."""
+    def test_participant_missing_user_display_name(self):
+        """Test participant where user has no display_name."""
         pr = {
             **SAMPLE_PR,
             "participants": [
                 {
-                    "display_name": None,
                     "role": "REVIEWER",
                     "approved": False,
                     "type": "participant",
                     "user": {
-                        "display_name": "Louis-Philippe Chouinard",
-                        "links": SAMPLE_LINKS,
+                        "display_name": None,
+                        "uuid": "{some-uuid}",
+                        "links": {},
                         "type": "user",
                     },
                 }
             ],
         }
         result = slim_pull_request(pr)
-        assert result["participants"][0]["display_name"] == "Louis-Philippe Chouinard"
+        assert result["participants"][0]["display_name"] is None
+        assert result["participants"][0]["uuid"] == "{some-uuid}"
+
+    def test_slim_pull_request_author_uuid(self):
+        result = slim_pull_request(SAMPLE_PR)
+        assert result["author_uuid"] == "{e7ae358e-abb2-4b2e-8e00-3976fa551c45}"
 
     def test_preserves_comment_stats(self):
         pr_with_stats = {**SAMPLE_PR, "comment_stats": {"total": 5, "resolved": 3, "unresolved": 2}}

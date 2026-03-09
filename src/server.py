@@ -301,7 +301,7 @@ async def create_pull_request(
         source_branch: Source branch name
         target_branch: Target branch name
         workspace: Workspace name (optional, defaults to configured workspace)
-        reviewers: List of reviewer usernames (optional)
+        reviewers: List of reviewer UUIDs (optional)
         draft: Whether to create the pull request as a draft (default: False)
 
     Returns:
@@ -321,7 +321,8 @@ async def update_pull_request(
     pull_request_id: str,
     workspace: Optional[str] = None,
     title: Optional[str] = None,
-    description: Optional[str] = None
+    description: Optional[str] = None,
+    reviewers: Optional[list] = None
 ) -> Dict[str, Any]:
     """
     Update a pull request.
@@ -332,15 +333,19 @@ async def update_pull_request(
         workspace: Workspace name (optional, defaults to configured workspace)
         title: New pull request title (optional)
         description: New pull request description (optional)
+        reviewers: Complete list of reviewer UUIDs to set on the PR (optional).
+            WARNING: this REPLACES the entire reviewer list — include all existing reviewers
+            you want to keep, plus any new ones. Use get_pull_request first to retrieve
+            current reviewer UUIDs. Pass [] to clear all reviewers.
 
     Returns:
         Updated pull request details
     """
     client = get_client()
     result = await client.update_pull_request(
-        repo_slug, pull_request_id, workspace, title, description
+        repo_slug, pull_request_id, workspace, title, description, reviewers
     )
-    return slim_pull_request_created(result)
+    return slim_pull_request(result)
 
 
 @conditional_tool()

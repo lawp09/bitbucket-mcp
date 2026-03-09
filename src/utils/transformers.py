@@ -95,18 +95,21 @@ def slim_pull_request(pr: Dict[str, Any]) -> Dict[str, Any]:
         "state": pr.get("state"),
         "draft": pr.get("draft"),
         "author": pr.get("author", {}).get("display_name"),
+        "author_uuid": pr.get("author", {}).get("uuid"),
         "source_branch": source.get("branch", {}).get("name"),
         "destination_branch": destination.get("branch", {}).get("name"),
         "reviewers": [
             {
-                "display_name": r.get("display_name") or r.get("user", {}).get("display_name"),
+                "display_name": r.get("display_name"),
+                "uuid": r.get("uuid"),
                 "approved": r.get("approved"),
             }
             for r in pr.get("reviewers", [])
         ],
         "participants": [
             {
-                "display_name": p.get("display_name") or p.get("user", {}).get("display_name"),
+                "display_name": p.get("user", {}).get("display_name"),
+                "uuid": p.get("user", {}).get("uuid"),
                 "role": p.get("role"),
                 "approved": p.get("approved"),
             }
