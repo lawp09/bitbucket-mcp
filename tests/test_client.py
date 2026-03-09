@@ -151,3 +151,59 @@ def test_create_pull_request_task_accepts_comment_id():
     assert "comment_id" in sig.parameters
     param = sig.parameters["comment_id"]
     assert param.default is None
+
+
+import httpx
+import respx
+
+
+@pytest.mark.asyncio
+async def test_update_pull_request_with_reviewers():
+    """Test that update_pull_request sends reviewers in payload."""
+    pr_url = "https://api.bitbucket.org/2.0/repositories/workspace/my-repo/pullrequests/42"
+    with respx.mock:
+        route = respx.put(pr_url).mock(
+            return_value=httpx.Response(200, json={"id": 1, "title": "Test", "reviewers": []})
+        )
+        async with BitbucketClient("test@example.com", "token", "workspace") as client:
+            await client.update_pull_request(
+                "my-repo", "42",
+                reviewers=["{uuid-1}", "{uuid-2}"]
+            )
+        payload = route.calls.last.request.read()
+        import json
+        body = json.loads(payload)
+        assert body["reviewers"] == [{"uuid": "{uuid-1}"}, {"uuid": "{uuid-2}"}]
+        assert "title" not in body
+        assert "description" not in body
+
+
+@pytest.mark.asyncio
+async def test_update_pull_request_reviewers_none_not_in_payload():
+    """Test that reviewers=None does not add reviewers to payload."""
+    pr_url = "https://api.bitbucket.org/2.0/repositories/workspace/my-repo/pullrequests/42"
+    with respx.mock:
+        route = respx.put(pr_url).mock(
+            return_value=httpx.Response(200, json={"id": 1, "title": "New title"})
+        )
+        async with BitbucketClient("test@example.com", "token", "workspace") as client:
+            await client.update_pull_request("my-repo", "42", title="New title")
+        import json
+        body = json.loads(route.calls.last.request.read())
+        assert "reviewers" not in body
+        assert body["title"] == "New title"
+
+
+@pytest.mark.asyncio
+async def test_update_pull_request_reviewers_empty_list():
+    """Test that reviewers=[] sends empty reviewers list (clears reviewers)."""
+    pr_url = "https://api.bitbucket.org/2.0/repositories/workspace/my-repo/pullrequests/42"
+    with respx.mock:
+        route = respx.put(pr_url).mock(
+            return_value=httpx.Response(200, json={"id": 1, "title": "Test", "reviewers": []})
+        )
+        async with BitbucketClient("test@example.com", "token", "workspace") as client:
+            await client.update_pull_request("my-repo", "42", reviewers=[])
+        import json
+        body = json.loads(route.calls.last.request.read())
+        assert body["reviewers"] == []

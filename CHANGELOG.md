@@ -1,5 +1,18 @@
 # Changelog - Bitbucket MCP Server Python
 
+## [Unreleased]
+
+### Added
+- `update_pull_request` — add `reviewers` parameter (list of UUIDs); supports adding, replacing, or clearing reviewers (`[]` clears all)
+- `slim_pull_request` — expose `author_uuid`, `reviewers[].uuid`, and `participants[].uuid` to enable read-then-write reviewer workflows
+
+### Fixed
+- `slim_pull_request` — read reviewer/participant UUIDs via `user.uuid` (correct Bitbucket API structure); test fixture updated to match real API shape `{"user": {...}, "approved": bool}`
+- `update_pull_request` — return full `slim_pull_request` response (instead of `slim_pull_request_created`) so caller can confirm reviewer changes
+- `create_pull_request` docstring — correct `reviewers` param description from "usernames" to "UUIDs"
+
+---
+
 ## [1.12.0] - 2026-02-27
 
 ### Changed
