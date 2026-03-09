@@ -207,3 +207,77 @@ async def test_update_pull_request_reviewers_empty_list():
         import json
         body = json.loads(route.calls.last.request.read())
         assert body["reviewers"] == []
+
+
+@pytest.mark.asyncio
+async def test_update_pull_request_reviewers_already_dict():
+    """Test that reviewers passed as dicts are not double-wrapped."""
+    pr_url = "https://api.bitbucket.org/2.0/repositories/workspace/my-repo/pullrequests/42"
+    with respx.mock:
+        route = respx.put(pr_url).mock(
+            return_value=httpx.Response(200, json={"id": 1, "title": "Test", "reviewers": []})
+        )
+        async with BitbucketClient("test@example.com", "token", "workspace") as client:
+            await client.update_pull_request(
+                "my-repo", "42",
+                reviewers=[{"uuid": "{a2b9e5bf-1234}"}]
+            )
+        import json
+        body = json.loads(route.calls.last.request.read())
+        assert body["reviewers"] == [{"uuid": "{a2b9e5bf-1234}"}]
+
+
+@pytest.mark.asyncio
+async def test_update_pull_request_reviewers_mixed_str_and_dict():
+    """Test that a mix of string and dict reviewers is normalized correctly."""
+    pr_url = "https://api.bitbucket.org/2.0/repositories/workspace/my-repo/pullrequests/42"
+    with respx.mock:
+        route = respx.put(pr_url).mock(
+            return_value=httpx.Response(200, json={"id": 1, "title": "Test", "reviewers": []})
+        )
+        async with BitbucketClient("test@example.com", "token", "workspace") as client:
+            await client.update_pull_request(
+                "my-repo", "42",
+                reviewers=["{uuid-str}", {"uuid": "{uuid-dict}"}]
+            )
+        import json
+        body = json.loads(route.calls.last.request.read())
+        assert body["reviewers"] == [{"uuid": "{uuid-str}"}, {"uuid": "{uuid-dict}"}]
+
+
+@pytest.mark.asyncio
+async def test_create_pull_request_with_reviewers_as_dicts():
+    """Test that create_pull_request handles dict reviewers without double-wrapping."""
+    pr_url = "https://api.bitbucket.org/2.0/repositories/workspace/my-repo/pullrequests"
+    with respx.mock:
+        route = respx.post(pr_url).mock(
+            return_value=httpx.Response(201, json={"id": 1, "title": "New PR"})
+        )
+        async with BitbucketClient("test@example.com", "token", "workspace") as client:
+            await client.create_pull_request(
+                "my-repo", "New PR", "Description",
+                "feature-branch", "main",
+                reviewers=[{"uuid": "{a2b9e5bf-1234}"}]
+            )
+        import json
+        body = json.loads(route.calls.last.request.read())
+        assert body["reviewers"] == [{"uuid": "{a2b9e5bf-1234}"}]
+
+
+@pytest.mark.asyncio
+async def test_create_pull_request_with_reviewers_as_strings():
+    """Test that create_pull_request wraps string reviewers correctly."""
+    pr_url = "https://api.bitbucket.org/2.0/repositories/workspace/my-repo/pullrequests"
+    with respx.mock:
+        route = respx.post(pr_url).mock(
+            return_value=httpx.Response(201, json={"id": 1, "title": "New PR"})
+        )
+        async with BitbucketClient("test@example.com", "token", "workspace") as client:
+            await client.create_pull_request(
+                "my-repo", "New PR", "Description",
+                "feature-branch", "main",
+                reviewers=["{uuid-1}", "{uuid-2}"]
+            )
+        import json
+        body = json.loads(route.calls.last.request.read())
+        assert body["reviewers"] == [{"uuid": "{uuid-1}"}, {"uuid": "{uuid-2}"}]
