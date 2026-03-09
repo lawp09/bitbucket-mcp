@@ -1,5 +1,14 @@
 # Changelog - Bitbucket MCP Server Python
 
+## [1.13.1] - 2026-03-09
+
+### Fixed
+- `create_pull_request` / `update_pull_request` — fix double-wrapping of reviewer dicts (e.g. `{"uuid": {"uuid": "..."}}`) when caller passes pre-formed `{"uuid": "..."}` objects; extract `_normalize_reviewers` helper
+- `create_pull_request` — unify `if reviewers:` → `if reviewers is not None:` to match `update_pull_request` behavior
+- `create_pull_request` — fix type hint from `List[str]` to `list` to accept both string and dict reviewers
+
+---
+
 ## [1.13.0] - 2026-03-09
 
 ### Added
@@ -7,9 +16,6 @@
 - `slim_pull_request` — expose `author_uuid`, `reviewers[].uuid`, and `participants[].uuid` to enable read-then-write reviewer workflows
 
 ### Fixed
-- `create_pull_request` / `update_pull_request` — fix double-wrapping of reviewer dicts (e.g. `{"uuid": {"uuid": "..."}}`) when caller passes pre-formed `{"uuid": "..."}` objects; extract `_normalize_reviewers` helper
-- `create_pull_request` — unify `if reviewers:` → `if reviewers is not None:` to match `update_pull_request` behavior
-- `create_pull_request` — fix type hint from `List[str]` to `list` to accept both string and dict reviewers
 - `slim_pull_request` — reviewers use flat user structure (`r.uuid`, `r.display_name`); participants use nested structure (`p.user.uuid`) — matches real Bitbucket API shapes
 - `update_pull_request` — return full `slim_pull_request` response (instead of `slim_pull_request_created`) so caller can confirm reviewer changes
 - `create_pull_request` docstring — correct `reviewers` param description from "usernames" to "UUIDs"
