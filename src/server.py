@@ -36,35 +36,65 @@ logger = logging.getLogger(__name__)
 
 # ========== Tool Configuration ==========
 
-def load_tools_config() -> Dict[str, bool]:
+def load_tools_config(config_path: Optional[str] = None) -> Dict[str, bool]:
     """
-    Load tool configuration from configs/tools.json.
+    Load tool configuration from a JSON file.
+
+    Fallback chain (first wins):
+    1. ``config_path`` argument passed directly to this function
+    2. ``BITBUCKET_TOOLS_CONFIG`` environment variable
+    3. Default path: ``configs/tools.json`` relative to the project root
+
+    When the resolved path comes from an explicit source (arg or env var) and
+    the file is missing or contains invalid JSON, a hard exception is raised.
+    When falling back to the default path and it is missing, all tools are
+    enabled and no exception is raised (fail-open, backward-compatible).
+
+    Args:
+        config_path: Optional explicit path to a tools config JSON file.
 
     Returns:
-        Dictionary mapping tool names to their enabled status
+        Dictionary mapping tool names to their enabled status.
+
+    Raises:
+        FileNotFoundError: If an explicit config path does not exist.
+        ValueError: If an explicit config file contains invalid JSON.
     """
-    # Get project root (parent of src directory)
     project_root = Path(__file__).parent.parent
-    config_file = project_root / "configs" / "tools.json"
+    default_path = str(project_root / "configs" / "tools.json")
+
+    env_config = os.getenv("BITBUCKET_TOOLS_CONFIG", "").strip() or None
+    resolved_path = config_path or env_config or default_path
+    config_file = Path(resolved_path).resolve()
+    is_explicit = bool(config_path or env_config)
+    source = "config_path" if config_path else "BITBUCKET_TOOLS_CONFIG"
+
+    logger.info(f"Tools config source: {config_file}")
 
     enabled_tools = {}
-
     try:
         if config_file.exists():
             with open(config_file, 'r') as f:
                 config = json.load(f)
-
-            # Flatten the nested structure to get tool_name -> enabled mapping
             for category, tools in config.get("tools", {}).items():
                 for tool_name, tool_config in tools.items():
                     enabled_tools[tool_name] = tool_config.get("enabled", True)
-
-            logger.info(f"Loaded tool configuration from {config_file}")
             logger.info(f"Enabled tools: {sum(enabled_tools.values())}/{len(enabled_tools)}")
+        elif is_explicit:
+            raise FileNotFoundError(f"Tools config not found ({source}={resolved_path})")
         else:
             logger.warning(f"Tool configuration file not found: {config_file}")
             logger.info("All tools will be enabled by default")
+    except json.JSONDecodeError as e:
+        if is_explicit:
+            raise ValueError(f"Invalid JSON in tools config ({source}={config_file}): {e}")
+        logger.error(f"Error loading tool configuration: {e}")
+        logger.info("All tools will be enabled by default")
+    except (FileNotFoundError, ValueError):
+        raise
     except Exception as e:
+        if is_explicit:
+            raise
         logger.error(f"Error loading tool configuration: {e}")
         logger.info("All tools will be enabled by default")
 

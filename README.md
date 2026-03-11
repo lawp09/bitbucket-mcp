@@ -14,7 +14,7 @@ Connect **Claude Code**, **VS Code (GitHub Copilot)**, **Cursor**, and any MCP-c
 
 - **45 MCP tools** — repositories, pull requests, comments, tasks, diffs, pipelines, build statuses, reviewers, draft PRs, batch review
 - **Slim responses** — stripped API noise for lower LLM token usage
-- **Configurable** — enable/disable tools via `configs/tools.json`
+- **Configurable** — enable/disable tools via `configs/tools.json` or `BITBUCKET_TOOLS_CONFIG` env var
 - **Secure credentials** — environment variables or system keychain
 
 ## Quick Start
@@ -150,6 +150,21 @@ Add to `~/.cursor/mcp.json`:
 | **Review Summary** | `get_pull_request_review_summary` |
 
 > Disabled by default: `merge_pull_request` (safety), `stop_pipeline` (safety), `get_pull_request_patch` (git am format — not useful for AI review), `convert_pull_request_to_draft` (not supported by Bitbucket API). Enable in `configs/tools.json`.
+
+### Custom tool configuration
+
+By default the server reads `configs/tools.json` bundled with the package. You can point to a custom file at runtime without rebuilding:
+
+```bash
+export BITBUCKET_TOOLS_CONFIG=/path/to/my-tools.json
+```
+
+**Fallback chain** (first match wins):
+
+1. `BITBUCKET_TOOLS_CONFIG` environment variable
+2. Built-in `configs/tools.json`
+
+> **Fail-safe behaviour** — If `BITBUCKET_TOOLS_CONFIG` is set but the file is missing or contains invalid JSON, the server raises an error on startup (explicit failure rather than silently ignoring the override). If the built-in default is missing, all tools are enabled.
 
 > **Token tip** — `get_pull_request_diff` accepts an optional `path` parameter to filter the diff to a single file, reducing token usage by ~95% on large PRs:
 > ```
