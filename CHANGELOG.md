@@ -1,5 +1,15 @@
 # Changelog - Bitbucket MCP Server Python
 
+## [1.14.0] - 2026-03-11
+
+### Added
+- `BITBUCKET_TOOLS_CONFIG` environment variable — override the built-in `configs/tools.json` at runtime to restrict which MCP tools are registered
+- Fallback chain: `config_path` argument > `BITBUCKET_TOOLS_CONFIG` env var > default path
+- Fail-safe: explicit config paths that are missing or contain invalid JSON raise a hard error at startup
+- 7 unit tests for `load_tools_config()` runtime path resolution
+
+---
+
 ## [1.13.1] - 2026-03-09
 
 ### Fixed
