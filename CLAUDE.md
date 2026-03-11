@@ -157,6 +157,14 @@ Edit `configs/tools.json` to enable/disable tools:
 }
 ```
 
+**Runtime override via env var** — set `BITBUCKET_TOOLS_CONFIG` to point to a custom JSON file without modifying the bundled config:
+
+```bash
+export BITBUCKET_TOOLS_CONFIG=/path/to/my-tools.json
+```
+
+Fallback chain: `BITBUCKET_TOOLS_CONFIG` → `configs/tools.json` (built-in default). An explicit path that is missing or invalid raises a hard error at startup.
+
 ### Slim Responses
 
 All tool responses pass through transformers (`src/utils/transformers.py`) that strip unnecessary Bitbucket API fields (links, avatars, nested metadata) to reduce LLM token usage. Each entity type has a dedicated `slim_*` function.
