@@ -1,6 +1,6 @@
 # Changelog - Bitbucket MCP Server Python
 
-## [Unreleased]
+## [1.14.1] - 2026-03-13
 
 ### Fixed
 - `get_pull_request_review_summary` — eliminate redundant PR API call in diffstat (5→4 HTTP requests per invocation)
