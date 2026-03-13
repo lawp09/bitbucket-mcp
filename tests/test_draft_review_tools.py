@@ -265,6 +265,15 @@ async def test_get_review_summary_ready(mock_get_client):
     assert len(result["unresolved_comments"]) == 0
     assert len(result["ci_statuses"]) == 1
 
+    # Verify pr_data is passed to diffstat to avoid redundant API call
+    mock_client.get_pull_request_diffstat.assert_called_once_with(
+        "my-repo", "42", None, page_size=100, max_pages=5, pr_data=SAMPLE_PR_RESPONSE
+    )
+    # Verify unresolved_only=True is passed for API-side filtering
+    mock_client.get_pull_request_comments.assert_called_once_with(
+        "my-repo", "42", None, page_size=100, max_pages=5, unresolved_only=True
+    )
+
 
 @pytest.mark.asyncio
 @patch("src.server.get_client")
@@ -329,6 +338,105 @@ async def test_get_review_summary_unresolved(mock_get_client):
 
     assert result["review_readiness"] == "has_unresolved_comments"
     assert len(result["unresolved_comments"]) == 1
+
+
+@pytest.mark.asyncio
+@patch("src.server.get_client")
+async def test_get_review_summary_filters_resolved_comments(mock_get_client):
+    """Resolved comments must be excluded from unresolved_comments output."""
+    from src.server import get_pull_request_review_summary
+
+    unresolved = {
+        "id": 1,
+        "content": {"raw": "Fix this"},
+        "user": {"display_name": "Reviewer", "nickname": "rev"},
+        "created_on": "2026-01-01T00:00:00Z",
+        "updated_on": "2026-01-01T00:00:00Z",
+        "pending": False,
+    }
+    resolved = {
+        "id": 2,
+        "content": {"raw": "Old comment"},
+        "user": {"display_name": "Reviewer", "nickname": "rev"},
+        "created_on": "2026-01-01T00:00:00Z",
+        "updated_on": "2026-01-01T00:00:00Z",
+        "pending": False,
+        "resolution": {
+            "user": {"display_name": "Author"},
+            "created_on": "2026-01-02T00:00:00Z",
+        },
+    }
+
+    mock_client = AsyncMock()
+    mock_client.get_pull_request.return_value = SAMPLE_PR_RESPONSE
+    mock_client.get_pull_request_diffstat.return_value = {"values": []}
+    mock_client.get_pull_request_comments.return_value = {"values": [unresolved, resolved]}
+    mock_client.get_pull_request_statuses.return_value = {"values": []}
+    mock_get_client.return_value = mock_client
+
+    result = await get_pull_request_review_summary("my-repo", "42")
+
+    assert len(result["unresolved_comments"]) == 1
+    assert result["unresolved_comments"][0]["id"] == 1
+    assert result["review_readiness"] == "has_unresolved_comments"
+
+
+@pytest.mark.asyncio
+@patch("src.server.get_client")
+async def test_get_review_summary_ci_pending(mock_get_client):
+    """INPROGRESS CI status should yield ci_pending readiness."""
+    from src.server import get_pull_request_review_summary
+
+    mock_client = AsyncMock()
+    mock_client.get_pull_request.return_value = SAMPLE_PR_RESPONSE
+    mock_client.get_pull_request_diffstat.return_value = {"values": []}
+    mock_client.get_pull_request_comments.return_value = {"values": []}
+    mock_client.get_pull_request_statuses.return_value = {
+        "values": [{"state": "INPROGRESS", "name": "CI", "description": "Running",
+                    "url": "https://ci.example.com", "commit": {"hash": "abc"},
+                    "created_on": "2026-01-01", "updated_on": "2026-01-01"}]
+    }
+    mock_get_client.return_value = mock_client
+
+    result = await get_pull_request_review_summary("my-repo", "42")
+
+    assert result["review_readiness"] == "ci_pending"
+
+
+@pytest.mark.asyncio
+@patch("src.server.get_client")
+async def test_get_review_summary_merged(mock_get_client):
+    """Merged PR should yield merged readiness."""
+    from src.server import get_pull_request_review_summary
+
+    mock_client = AsyncMock()
+    mock_client.get_pull_request.return_value = {**SAMPLE_PR_RESPONSE, "state": "MERGED"}
+    mock_client.get_pull_request_diffstat.return_value = {"values": []}
+    mock_client.get_pull_request_comments.return_value = {"values": []}
+    mock_client.get_pull_request_statuses.return_value = {"values": []}
+    mock_get_client.return_value = mock_client
+
+    result = await get_pull_request_review_summary("my-repo", "42")
+
+    assert result["review_readiness"] == "merged"
+
+
+@pytest.mark.asyncio
+@patch("src.server.get_client")
+async def test_get_review_summary_declined(mock_get_client):
+    """Declined PR should yield declined readiness."""
+    from src.server import get_pull_request_review_summary
+
+    mock_client = AsyncMock()
+    mock_client.get_pull_request.return_value = {**SAMPLE_PR_RESPONSE, "state": "DECLINED"}
+    mock_client.get_pull_request_diffstat.return_value = {"values": []}
+    mock_client.get_pull_request_comments.return_value = {"values": []}
+    mock_client.get_pull_request_statuses.return_value = {"values": []}
+    mock_get_client.return_value = mock_client
+
+    result = await get_pull_request_review_summary("my-repo", "42")
+
+    assert result["review_readiness"] == "declined"
 
 
 # ========== Tool 6: suggest_pull_request_reviewers ==========

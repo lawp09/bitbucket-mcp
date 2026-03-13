@@ -1,5 +1,22 @@
 # Changelog - Bitbucket MCP Server Python
 
+## [Unreleased]
+
+### Fixed
+- `get_pull_request_review_summary` — eliminate redundant PR API call in diffstat (5→4 HTTP requests per invocation)
+- `get_pull_request_review_summary` — restore `unresolved_only=True` for API-side comment filtering
+- `get_pull_request_review_summary` — compute `ci_failing`/`ci_pending` from slimmed data (single source of truth)
+- `_enrich_comment_with_resolution` — return a copy instead of mutating the input dict
+- Remove dead code checking `state=="DRAFT"` (Bitbucket Cloud uses `draft: true`)
+
+### Added
+- `get_pull_request_review_summary` — new `review_readiness` states: `ci_pending`, `merged`, `declined`
+- `get_pull_request_diffstat` client method — optional `pr_data` parameter to skip redundant PR fetch
+- 4 new tests: resolved comment filtering, `ci_pending`, `merged`, `declined` readiness states
+- Call argument assertions in tests to lock optimizations against regressions
+
+---
+
 ## [1.14.0] - 2026-03-11
 
 ### Added

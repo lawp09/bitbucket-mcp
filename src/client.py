@@ -1277,7 +1277,8 @@ class BitbucketClient:
         pull_request_id: str,
         workspace: Optional[str] = None,
         page_size: int = 10,
-        max_pages: Optional[int] = 1
+        max_pages: Optional[int] = 1,
+        pr_data: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         Get file modification statistics for a pull request with pagination support.
@@ -1288,6 +1289,8 @@ class BitbucketClient:
             workspace: Workspace name (defaults to self.workspace)
             page_size: Items per page (default: 10)
             max_pages: Maximum pages to fetch (default: 1)
+            pr_data: Pre-fetched PR data to extract diffstat URL from links,
+                     avoiding a redundant API call (optional)
 
         Returns:
             Statistics with lines added/removed per file
@@ -1300,12 +1303,13 @@ class BitbucketClient:
         ws = workspace or self.workspace
         config = PaginationConfig(page_size=page_size, max_pages=max_pages)
 
-        # First get the PR to extract the diffstat URL from links
-        pr_response = await self.client.get(
-            f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}"
-        )
-        pr_response.raise_for_status()
-        pr_data = pr_response.json()
+        # Use provided pr_data or fetch it
+        if pr_data is None:
+            pr_response = await self.client.get(
+                f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}"
+            )
+            pr_response.raise_for_status()
+            pr_data = pr_response.json()
 
         # Get the diffstat URL from the PR links
         if 'links' in pr_data and 'diffstat' in pr_data['links']:
