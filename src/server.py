@@ -524,23 +524,21 @@ def _enrich_comment_with_resolution(comment: Dict[str, Any]) -> Dict[str, Any]:
     """
     Enrich a comment with resolution status fields.
 
+    Returns a new dict (does not mutate the input).
+
     Args:
         comment: Comment object from API
 
     Returns:
-        Comment with added fields: is_resolved, resolved_by, resolved_on
+        New dict with added fields: is_resolved, resolved_by, resolved_on
     """
     resolution = comment.get("resolution")
-    comment["is_resolved"] = resolution is not None
-
-    if resolution:
-        comment["resolved_by"] = resolution.get("user", {}).get("display_name")
-        comment["resolved_on"] = resolution.get("created_on")
-    else:
-        comment["resolved_by"] = None
-        comment["resolved_on"] = None
-
-    return comment
+    return {
+        **comment,
+        "is_resolved": resolution is not None,
+        "resolved_by": resolution.get("user", {}).get("display_name") if resolution else None,
+        "resolved_on": resolution.get("created_on") if resolution else None,
+    }
 
 
 @conditional_tool()
@@ -1508,8 +1506,8 @@ async def get_pull_request_review_summary(
     """
     Get a comprehensive review summary for a pull request.
 
-    Aggregates PR details, diffstat, unresolved comments, and CI statuses in parallel
-    for efficient AI-assisted code review.
+    Fetches PR details first, then aggregates diffstat, unresolved comments,
+    and CI statuses in parallel for efficient AI-assisted code review.
 
     Args:
         repo_slug: Repository slug
@@ -1517,13 +1515,19 @@ async def get_pull_request_review_summary(
         workspace: Workspace name (optional, defaults to configured workspace)
 
     Returns:
-        Structured summary with pr details, diffstat, unresolved comments, CI statuses, and review readiness assessment
+        Structured summary with pr details, diffstat, unresolved comments,
+        CI statuses, and review readiness assessment.
+        review_readiness: merged | declined | draft | ci_failing | ci_pending |
+                          has_unresolved_comments | ready
     """
     client = get_client()
 
-    pr_data, diffstat_data, comments_data, statuses_data = await asyncio.gather(
-        client.get_pull_request(repo_slug, pull_request_id, workspace),
-        client.get_pull_request_diffstat(repo_slug, pull_request_id, workspace, page_size=100, max_pages=5),
+    # Fetch PR first (reused by diffstat to avoid a redundant API call)
+    pr_data = await client.get_pull_request(repo_slug, pull_request_id, workspace)
+
+    # Parallel fetch: diffstat (reusing pr_data), unresolved comments, CI statuses
+    diffstat_data, comments_data, statuses_data = await asyncio.gather(
+        client.get_pull_request_diffstat(repo_slug, pull_request_id, workspace, page_size=100, max_pages=5, pr_data=pr_data),
         client.get_pull_request_comments(repo_slug, pull_request_id, workspace, page_size=100, max_pages=5, unresolved_only=True),
         client.get_pull_request_statuses(repo_slug, pull_request_id, workspace, page_size=100, max_pages=5),
     )
@@ -1538,7 +1542,7 @@ async def get_pull_request_review_summary(
         "files": [slim_diffstat_entry(f) for f in diffstat_values]
     }
 
-    # Process unresolved comments (defensive filter in case API returns resolved ones)
+    # Defensive filter in case API returns resolved comments despite unresolved_only query
     unresolved_comments = [
         slim_comment(_enrich_comment_with_resolution(c))
         for c in comments_data.get("values", [])
@@ -1547,14 +1551,20 @@ async def get_pull_request_review_summary(
 
     ci_statuses = [slim_status(s) for s in statuses_data.get("values", [])]
 
-    is_draft = pr_data.get("state") == "DRAFT" or pr_data.get("draft") is True
+    pr_state = pr_data.get("state")
+    is_draft = pr_data.get("draft") is True
     has_unresolved = len(unresolved_comments) > 0
-    ci_failing = any(s.get("state") in ("FAILED", "ERROR", "STOPPED") for s in statuses_data.get("values", []))
+    ci_failing = any(s.get("state") in ("FAILED", "ERROR", "STOPPED") for s in ci_statuses)
+    ci_pending = any(s.get("state") == "INPROGRESS" for s in ci_statuses)
 
-    if is_draft:
+    if pr_state in ("MERGED", "DECLINED"):
+        review_readiness = pr_state.lower()
+    elif is_draft:
         review_readiness = "draft"
     elif ci_failing:
         review_readiness = "ci_failing"
+    elif ci_pending:
+        review_readiness = "ci_pending"
     elif has_unresolved:
         review_readiness = "has_unresolved_comments"
     else:
