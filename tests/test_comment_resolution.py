@@ -117,8 +117,8 @@ class TestUnresolvedOnlyFiltering:
     """Tests for unresolved_only filter parameter"""
 
     @pytest.mark.asyncio
-    async def test_unresolved_only_parameter_adds_query_param(self):
-        """Test that unresolved_only parameter adds q=resolution=null query param"""
+    async def test_unresolved_only_does_not_add_query_param(self):
+        """Test that unresolved_only=True does NOT add q param (filtering is client-side)"""
         mock_response = {
             "values": [
                 {
@@ -133,8 +133,7 @@ class TestUnresolvedOnlyFiltering:
 
         with respx.mock as respx_mock:
             route = respx_mock.get(
-                url="https://api.bitbucket.org/2.0/repositories/workspace/repo/pullrequests/1/comments",
-                params={"q": "resolution=null"}
+                url="https://api.bitbucket.org/2.0/repositories/workspace/repo/pullrequests/1/comments"
             ).mock(return_value=httpx.Response(200, json=mock_response))
 
             async with BitbucketClient("test@example.com", "token", "workspace") as client:
@@ -143,6 +142,7 @@ class TestUnresolvedOnlyFiltering:
                 )
 
             assert route.called
+            assert "q" not in dict(route.calls[0].request.url.params)
             assert len(result["values"]) == 1
             assert result["values"][0]["resolution"] is None
 
@@ -178,19 +178,19 @@ class TestUnresolvedOnlyFiltering:
             assert len(result["values"]) == 2
 
     @pytest.mark.asyncio
-    async def test_unresolved_only_returns_only_unresolved(self):
-        """Test that unresolved_only filter returns only unresolved comments"""
+    async def test_unresolved_only_returns_all_comments_for_client_side_filtering(self):
+        """Test that unresolved_only=True returns ALL comments from API (filtering is caller's job)"""
         mock_response = {
             "values": [
                 {
                     "id": 10,
-                    "content": {"raw": "First unresolved"},
+                    "content": {"raw": "Unresolved comment"},
                     "resolution": None
                 },
                 {
                     "id": 11,
-                    "content": {"raw": "Second unresolved"},
-                    "resolution": None
+                    "content": {"raw": "Resolved comment"},
+                    "resolution": {"type": "resolved", "user": {"username": "reviewer"}}
                 }
             ],
             "pagelen": 10,
@@ -199,8 +199,7 @@ class TestUnresolvedOnlyFiltering:
 
         with respx.mock:
             respx.get(
-                url="https://api.bitbucket.org/2.0/repositories/workspace/repo/pullrequests/1/comments",
-                params={"q": "resolution=null"}
+                url="https://api.bitbucket.org/2.0/repositories/workspace/repo/pullrequests/1/comments"
             ).mock(return_value=httpx.Response(200, json=mock_response))
 
             async with BitbucketClient("test@example.com", "token", "workspace") as client:
@@ -208,8 +207,10 @@ class TestUnresolvedOnlyFiltering:
                     "repo", "1", unresolved_only=True
                 )
 
-            assert all(c["resolution"] is None for c in result["values"])
+            # Client returns ALL comments — caller (server.py) is responsible for filtering
             assert len(result["values"]) == 2
+            assert result["values"][0]["resolution"] is None
+            assert result["values"][1]["resolution"] is not None
 
 
 class TestCommentStatsCalculation:

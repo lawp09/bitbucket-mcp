@@ -451,7 +451,7 @@ class BitbucketClient:
             workspace: Workspace name (defaults to self.workspace)
             page_size: Items per page (default: 10)
             max_pages: Maximum pages to fetch (default: 1)
-            unresolved_only: Filter to unresolved comments only (default: False)
+            unresolved_only: Kept for backward compatibility (filtering is done client-side)
 
         Returns:
             Comments with aggregated values, including resolution field
@@ -459,8 +459,6 @@ class BitbucketClient:
         ws = workspace or self.workspace
         config = PaginationConfig(page_size=page_size, max_pages=max_pages)
         params = {}
-        if unresolved_only:
-            params["q"] = "resolution=null"
 
         return await aggregate_pages(
             self.client,

@@ -1,5 +1,14 @@
 # Changelog - Bitbucket MCP Server Python
 
+## [Unreleased]
+
+### Fixed
+- `get_pull_request_comments` — remove unsupported `q=resolution=null` API filter that caused 400 Bad Request on Bitbucket Cloud; unresolved filtering now done client-side in server.py
+- `get_pull_request_comments` MCP tool — `unresolved_only=True` now correctly filters results client-side (param was previously a no-op after API filter removal)
+- `pyproject.toml` — update development status classifier from Beta to Production/Stable
+
+---
+
 ## [1.14.1] - 2026-03-13
 
 ### Fixed

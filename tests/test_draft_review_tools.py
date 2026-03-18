@@ -269,7 +269,7 @@ async def test_get_review_summary_ready(mock_get_client):
     mock_client.get_pull_request_diffstat.assert_called_once_with(
         "my-repo", "42", None, page_size=100, max_pages=5, pr_data=SAMPLE_PR_RESPONSE
     )
-    # Verify unresolved_only=True is passed for API-side filtering
+    # Verify unresolved_only=True is passed (filtering is done client-side)
     mock_client.get_pull_request_comments.assert_called_once_with(
         "my-repo", "42", None, page_size=100, max_pages=5, unresolved_only=True
     )
