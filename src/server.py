@@ -576,7 +576,10 @@ async def get_pull_request_comments(
     )
 
     if "values" in result:
-        result["values"] = [_enrich_comment_with_resolution(comment) for comment in result["values"]]
+        comments = result["values"]
+        if unresolved_only:
+            comments = [c for c in comments if not c.get("resolution")]
+        result["values"] = [_enrich_comment_with_resolution(c) for c in comments]
 
     return slim_comment_list(result)
 
@@ -1542,7 +1545,7 @@ async def get_pull_request_review_summary(
         "files": [slim_diffstat_entry(f) for f in diffstat_values]
     }
 
-    # Defensive filter in case API returns resolved comments despite unresolved_only query
+    # Client-side filter: keep only unresolved comments (resolution=null)
     unresolved_comments = [
         slim_comment(_enrich_comment_with_resolution(c))
         for c in comments_data.get("values", [])

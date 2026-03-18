@@ -10,7 +10,7 @@ authors = [
 ]
 keywords = ["mcp", "bitbucket", "api", "model-context-protocol", "mcp-server", "claude-code", "cursor", "github-copilot", "pull-request", "code-review", "bitbucket-cloud", "pipelines", "llm", "ai-assistant"]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
