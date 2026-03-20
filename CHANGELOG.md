@@ -1,5 +1,12 @@
 # Changelog - Bitbucket MCP Server Python
 
+## [1.15.1] - 2026-03-20
+
+### Changed
+- Upgrade `mcp` dependency from `>=1.1.1` to `>=1.26.0,<2` (upper bound `<2` guards against future breaking changes)
+
+---
+
 ## [1.15.0] - 2026-03-18
 
 ### Fixed
