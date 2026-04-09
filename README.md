@@ -12,7 +12,7 @@ Connect **Claude Code**, **VS Code (GitHub Copilot)**, **Cursor**, and any MCP-c
 
 ## Features
 
-- **45 MCP tools** — repositories, pull requests, comments, tasks, diffs, pipelines, build statuses, reviewers, draft PRs, batch review
+- **46 MCP tools** — repositories, pull requests, comments, tasks, diffs, pipelines, build statuses, reviewers, draft PRs, batch review
 - **Slim responses** — stripped API noise for lower LLM token usage
 - **Configurable** — enable/disable tools via `configs/tools.json` or `BITBUCKET_TOOLS_CONFIG` env var
 - **Secure credentials** — environment variables or system keychain
@@ -136,7 +136,7 @@ Add to `~/.cursor/mcp.json`:
 
 | Category | Tools |
 |----------|-------|
-| **Repositories** | `list_repositories`, `get_repository` |
+| **Repositories** | `list_repositories`, `get_repository`, `get_repository_tags` |
 | **Pull Requests** | `get_pull_requests`, `get_pull_request`, `create_pull_request`, `update_pull_request`, `approve_pull_request`, `unapprove_pull_request`, `request_changes_pull_request`, `unrequest_changes_pull_request`, `decline_pull_request`, `merge_pull_request` |
 | **Comments** | `get_pull_request_comments`, `add_pull_request_comment`, `get_pull_request_comment`, `update_pull_request_comment`, `delete_pull_request_comment`, `resolve_pull_request_comment`, `reopen_pull_request_comment`, `get_pull_request_activity` |
 | **Tasks PR** | `get_pull_request_tasks`, `get_pull_request_task`, `create_pull_request_task`, `update_pull_request_task`, `delete_pull_request_task` |

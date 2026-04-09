@@ -11,7 +11,7 @@ from mcp.server.fastmcp import FastMCP
 from .client import BitbucketClient
 from .utils.credentials import get_credentials
 from .utils.transformers import (
-    slim_repository, slim_repository_list,
+    slim_repository, slim_repository_list, slim_tag_list,
     slim_pull_request, slim_pull_request_list, slim_pull_request_created,
     slim_status, slim_status_list,
     slim_commit_list,
@@ -216,6 +216,30 @@ async def get_repository(repo_slug: str, workspace: Optional[str] = None) -> Dic
     client = get_client()
     result = await client.get_repository(repo_slug, workspace)
     return slim_repository(result)
+
+
+@conditional_tool()
+async def get_repository_tags(
+    repo_slug: str,
+    workspace: Optional[str] = None,
+    page_size: int = 10,
+    max_pages: Optional[int] = 1
+) -> Dict[str, Any]:
+    """
+    List repository tags ordered by most recent target date.
+
+    Args:
+        repo_slug: Repository slug
+        workspace: Workspace name (optional, defaults to configured workspace)
+        page_size: Maximum number of tags to return (default: 10)
+        max_pages: Maximum pages to fetch (default: 1, max recommended: 10)
+
+    Returns:
+        Paginated list of repository tags
+    """
+    client = get_client()
+    result = await client.get_repository_tags(repo_slug, workspace, page_size, max_pages)
+    return slim_tag_list(result)
 
 
 # ========== Pull Request Tools ==========

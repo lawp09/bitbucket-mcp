@@ -2,7 +2,7 @@
 
 import pytest
 from src.utils.transformers import (
-    slim_repository, slim_repository_list,
+    slim_repository, slim_repository_list, slim_tag, slim_tag_list,
     slim_pull_request, slim_pull_request_list, slim_pull_request_created,
     slim_status, slim_status_list,
     slim_commit, slim_commit_list,
@@ -93,6 +93,21 @@ SAMPLE_REPOSITORY = {
     "parent": None,
     "has_issues": False,
     "has_wiki": False,
+}
+
+SAMPLE_TAG = {
+    "name": "v1.8.1",
+    "date": "2026-04-09T12:00:00+00:00",
+    "message": "tag annotation",
+    "target": {
+        "hash": "12185f94580331a0ec5c59bd9a004903a245818a",
+        "date": "2026-04-09T12:00:00+00:00",
+        "message": "release: ship 1.8.1",
+    },
+    "tagger": {
+        "date": "2026-04-09T11:55:00+00:00",
+    },
+    "links": SAMPLE_LINKS,
 }
 
 SAMPLE_PR = {
@@ -324,6 +339,29 @@ class TestSlimRepository:
         repo = {**SAMPLE_REPOSITORY, "project": None}
         result = slim_repository(repo)
         assert result["project"] is None
+
+
+class TestSlimTag:
+    def test_keeps_essential_fields(self):
+        result = slim_tag(SAMPLE_TAG)
+        assert result["name"] == "v1.8.1"
+        assert result["date"] == "2026-04-09T12:00:00+00:00"
+        assert result["target_hash"] == "12185f945803"
+        assert result["message"] == "release: ship 1.8.1"
+
+    def test_falls_back_to_tagger_and_tag_message(self):
+        tag = {"name": "v1.8.0", "message": "tag annotation", "tagger": {"date": "2026-04-08T10:00:00+00:00"}, "target": {}}
+        result = slim_tag(tag)
+        assert result["date"] == "2026-04-08T10:00:00+00:00"
+        assert result["message"] == "tag annotation"
+        assert result["target_hash"] == ""
+
+    def test_tag_list(self):
+        data = {"values": [SAMPLE_TAG], "size": 1, "page": 1}
+        result = slim_tag_list(data)
+        assert len(result["values"]) == 1
+        assert result["values"][0]["name"] == "v1.8.1"
+        assert result["count"] == 1
 
 
 # ========== Pull Request Tests ==========

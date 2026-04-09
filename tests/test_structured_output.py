@@ -46,6 +46,7 @@ async def test_tools_registered_with_structured_output():
     expected_tools = [
         "list_repositories",
         "get_repository",
+        "get_repository_tags",
         "get_pull_requests",
         "get_pull_request",
     ]

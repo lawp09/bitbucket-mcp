@@ -76,14 +76,59 @@ def test_new_methods_exist():
     client = BitbucketClient("test@example.com", "token", "workspace")
 
     # Check that the new methods exist
+    assert hasattr(client, "get_repository_tags")
     assert hasattr(client, "get_pull_request_statuses")
     assert hasattr(client, "get_pull_request_diffstat")
     assert hasattr(client, "get_commit_statuses")
 
     # Check they are callable
+    assert callable(getattr(client, "get_repository_tags"))
     assert callable(getattr(client, "get_pull_request_statuses"))
     assert callable(getattr(client, "get_pull_request_diffstat"))
     assert callable(getattr(client, "get_commit_statuses"))
+
+
+@pytest.mark.asyncio
+async def test_get_repository_tags_uses_refs_tags_endpoint_with_page_size_and_sort():
+    """Test that get_repository_tags requests the tags endpoint with recent-first sorting."""
+    tags_url = "https://api.bitbucket.org/2.0/repositories/workspace/my-repo/refs/tags"
+    response_payload = {
+        "pagelen": 10,
+        "size": 1,
+        "page": 1,
+        "values": [
+            {
+                "name": "v1.2.3",
+                "target": {
+                    "hash": "12185f94580331a0ec5c59bd9a004903a245818a",
+                    "date": "2026-04-09T12:00:00+00:00",
+                    "message": "release: ship 1.2.3"
+                }
+            }
+        ]
+    }
+
+    with respx.mock:
+        route = respx.get(tags_url).mock(return_value=httpx.Response(200, json=response_payload))
+        async with BitbucketClient("test@example.com", "token", "workspace") as client:
+            result = await client.get_repository_tags("my-repo", page_size=10)
+
+        assert result["values"][0]["name"] == "v1.2.3"
+        assert route.calls.last.request.url.params["sort"] == "-target.date"
+        assert route.calls.last.request.url.params["pagelen"] == "10"
+
+
+@pytest.mark.asyncio
+async def test_get_repository_tags_accepts_limit_alias_for_backward_compatibility():
+    """Test that get_repository_tags still accepts limit as an alias for page_size."""
+    tags_url = "https://api.bitbucket.org/2.0/repositories/workspace/my-repo/refs/tags"
+
+    with respx.mock:
+        route = respx.get(tags_url).mock(return_value=httpx.Response(200, json={"pagelen": 5, "size": 0, "page": 1, "values": []}))
+        async with BitbucketClient("test@example.com", "token", "workspace") as client:
+            await client.get_repository_tags("my-repo", limit=5)
+
+        assert route.calls.last.request.url.params["pagelen"] == "5"
 
 
 def test_request_changes_methods_exist():

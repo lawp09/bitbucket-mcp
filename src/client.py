@@ -123,6 +123,43 @@ class BitbucketClient:
         response.raise_for_status()
         return response.json()
 
+    async def get_repository_tags(
+        self,
+        repo_slug: str,
+        workspace: Optional[str] = None,
+        page_size: int = 10,
+        max_pages: Optional[int] = 1,
+        limit: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        List repository tags ordered by most recent target date.
+
+        Args:
+            repo_slug: Repository slug
+            workspace: Workspace name (defaults to self.workspace)
+            page_size: Maximum number of tags to return (default: 10)
+            max_pages: Maximum pages to fetch (default: 1)
+            limit: Deprecated alias for page_size kept for backward compatibility
+
+        Returns:
+            Paginated list of repository tags with aggregated values
+        """
+        ws = workspace or self.workspace
+        requested_page_size = limit if limit is not None else page_size
+        config = PaginationConfig(
+            page_size=requested_page_size,
+            max_pages=max_pages,
+            max_items=requested_page_size,
+        )
+        params = {"sort": "-target.date"}
+
+        return await aggregate_pages(
+            self.client,
+            f"/repositories/{ws}/{repo_slug}/refs/tags",
+            params,
+            config
+        )
+
     # ========== Pull Requests ==========
 
     async def get_pull_requests(

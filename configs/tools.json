@@ -10,6 +10,10 @@
       "get_repository": {
         "enabled": true,
         "description": "Get repository details"
+      },
+      "get_repository_tags": {
+        "enabled": true,
+        "description": "List recent tags for a repository"
       }
     },
     "pull_requests": {
