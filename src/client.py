@@ -149,17 +149,20 @@ class BitbucketClient:
         config = PaginationConfig(
             page_size=requested_page_size,
             max_pages=max_pages,
-            max_items=requested_page_size,
         )
         params = {"sort": "-target.date"}
 
-        return await aggregate_pages(
+        result = await aggregate_pages(
             self.client,
             f"/repositories/{ws}/{repo_slug}/refs/tags",
             params,
             config
         )
 
+        if requested_page_size is not None and isinstance(result.get("values"), list):
+            result["values"] = result["values"][:requested_page_size]
+
+        return result
     # ========== Pull Requests ==========
 
     async def get_pull_requests(
