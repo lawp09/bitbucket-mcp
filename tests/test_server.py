@@ -105,6 +105,17 @@ async def test_mcp_server_tools_registered():
     assert "submit_pull_request_batch_review" in tool_names
     assert "get_pull_request_review_summary" in tool_names
     assert "suggest_pull_request_reviewers" in tool_names
+    # Issue tracker tools
+    assert "list_issues" in tool_names
+    assert "get_issue" in tool_names
+    assert "create_issue" in tool_names
+    assert "update_issue" in tool_names
+    assert "delete_issue" not in tool_names  # disabled by default for safety
+    assert "get_issue_comments" in tool_names
+    assert "get_issue_comment" in tool_names
+    assert "add_issue_comment" in tool_names
+    assert "update_issue_comment" in tool_names
+    assert "delete_issue_comment" not in tool_names  # disabled by default for safety
 
 
 @pytest.mark.asyncio

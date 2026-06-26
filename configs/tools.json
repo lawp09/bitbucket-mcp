@@ -197,6 +197,48 @@
         "enabled": true,
         "description": "Get effective default reviewers for a repository"
       }
+    },
+    "issues": {
+      "list_issues": {
+        "enabled": true,
+        "description": "List issues in a repository issue tracker (filter by state/kind/priority/assignee/BBQL)"
+      },
+      "get_issue": {
+        "enabled": true,
+        "description": "Get details for a specific issue"
+      },
+      "create_issue": {
+        "enabled": true,
+        "description": "Create a new issue"
+      },
+      "update_issue": {
+        "enabled": true,
+        "description": "Update an issue (title, content, state, kind, priority, assignee)"
+      },
+      "delete_issue": {
+        "enabled": false,
+        "description": "Delete an issue (disabled by default for safety)"
+      },
+      "get_issue_comments": {
+        "enabled": true,
+        "description": "List comments on an issue"
+      },
+      "get_issue_comment": {
+        "enabled": true,
+        "description": "Get a specific comment on an issue"
+      },
+      "add_issue_comment": {
+        "enabled": true,
+        "description": "Add a comment to an issue"
+      },
+      "update_issue_comment": {
+        "enabled": true,
+        "description": "Update a comment on an issue"
+      },
+      "delete_issue_comment": {
+        "enabled": false,
+        "description": "Delete a comment on an issue (disabled by default for safety)"
+      }
     }
   }
 }
