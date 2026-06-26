@@ -1,5 +1,15 @@
 # Changelog - Bitbucket MCP Server Python
 
+## [1.16.0] - 2026-06-26
+
+### Added
+- `get_repository_tags` tool — list a repository's tags ordered by most recent target (commit) date, with slim responses (`slim_tag` / `slim_tag_list`) and pagination (`page_size` / `max_pages`). (#49)
+
+### Fixed
+- `get_repository_tags` — align pagination with `list_repositories`: remove the manual truncation that made `max_pages` silently ineffective, and drop the unused `limit` alias
+
+---
+
 ## [1.15.1] - 2026-03-20
 
 ### Changed
