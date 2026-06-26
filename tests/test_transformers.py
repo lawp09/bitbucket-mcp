@@ -363,6 +363,16 @@ class TestSlimTag:
         assert result["values"][0]["name"] == "v1.8.1"
         assert result["count"] == 1
 
+    def test_tag_list_flags_has_more_when_next_present(self):
+        data = {
+            "values": [SAMPLE_TAG],
+            "size": 1,
+            "page": 1,
+            "next": "https://api.bitbucket.org/2.0/repositories/ws/repo/refs/tags?page=2",
+        }
+        result = slim_tag_list(data)
+        assert result["has_more"] is True
+
 
 # ========== Pull Request Tests ==========
 

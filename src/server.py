@@ -228,10 +228,13 @@ async def get_repository_tags(
     """
     List repository tags ordered by most recent target date.
 
+    Note: "target date" is the date of the tag's target commit, not the tag
+    creation date — a tag placed on an old commit will not sort first.
+
     Args:
         repo_slug: Repository slug
         workspace: Workspace name (optional, defaults to configured workspace)
-        page_size: Maximum number of tags to return (default: 10)
+        page_size: Items per page (default: 10)
         max_pages: Maximum pages to fetch (default: 1, max recommended: 10)
 
     Returns:

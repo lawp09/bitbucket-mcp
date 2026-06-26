@@ -128,8 +128,7 @@ class BitbucketClient:
         repo_slug: str,
         workspace: Optional[str] = None,
         page_size: int = 10,
-        max_pages: Optional[int] = 1,
-        limit: Optional[int] = None
+        max_pages: Optional[int] = 1
     ) -> Dict[str, Any]:
         """
         List repository tags ordered by most recent target date.
@@ -137,32 +136,23 @@ class BitbucketClient:
         Args:
             repo_slug: Repository slug
             workspace: Workspace name (defaults to self.workspace)
-            page_size: Maximum number of tags to return (default: 10)
+            page_size: Items per page (default: 10)
             max_pages: Maximum pages to fetch (default: 1)
-            limit: Deprecated alias for page_size kept for backward compatibility
 
         Returns:
             Paginated list of repository tags with aggregated values
         """
         ws = workspace or self.workspace
-        requested_page_size = limit if limit is not None else page_size
-        config = PaginationConfig(
-            page_size=requested_page_size,
-            max_pages=max_pages,
-        )
+        config = PaginationConfig(page_size=page_size, max_pages=max_pages)
         params = {"sort": "-target.date"}
 
-        result = await aggregate_pages(
+        return await aggregate_pages(
             self.client,
             f"/repositories/{ws}/{repo_slug}/refs/tags",
             params,
             config
         )
 
-        if requested_page_size is not None and isinstance(result.get("values"), list):
-            result["values"] = result["values"][:requested_page_size]
-
-        return result
     # ========== Pull Requests ==========
 
     async def get_pull_requests(
