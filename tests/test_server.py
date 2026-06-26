@@ -72,6 +72,7 @@ async def test_mcp_server_tools_registered():
     assert "get_pull_request" in tool_names
     assert "get_pull_requests" in tool_names
     assert "list_repositories" in tool_names
+    assert "get_repository_tags" in tool_names
     assert "add_pull_request_comment" in tool_names
     assert "approve_pull_request" in tool_names
     assert "request_changes_pull_request" in tool_names
@@ -120,3 +121,6 @@ async def test_tool_descriptions():
 
     assert tool_dict["list_repositories"].description is not None
     assert "repositories" in tool_dict["list_repositories"].description.lower()
+
+    assert tool_dict["get_repository_tags"].description is not None
+    assert "tags" in tool_dict["get_repository_tags"].description.lower()

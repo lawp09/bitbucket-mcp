@@ -76,14 +76,88 @@ def test_new_methods_exist():
     client = BitbucketClient("test@example.com", "token", "workspace")
 
     # Check that the new methods exist
+    assert hasattr(client, "get_repository_tags")
     assert hasattr(client, "get_pull_request_statuses")
     assert hasattr(client, "get_pull_request_diffstat")
     assert hasattr(client, "get_commit_statuses")
 
     # Check they are callable
+    assert callable(getattr(client, "get_repository_tags"))
     assert callable(getattr(client, "get_pull_request_statuses"))
     assert callable(getattr(client, "get_pull_request_diffstat"))
     assert callable(getattr(client, "get_commit_statuses"))
+
+
+@pytest.mark.asyncio
+async def test_get_repository_tags_uses_refs_tags_endpoint_with_page_size_and_sort():
+    """Test that get_repository_tags requests the tags endpoint with recent-first sorting."""
+    tags_url = "https://api.bitbucket.org/2.0/repositories/workspace/my-repo/refs/tags"
+    response_payload = {
+        "pagelen": 10,
+        "size": 1,
+        "page": 1,
+        "values": [
+            {
+                "name": "v1.2.3",
+                "target": {
+                    "hash": "12185f94580331a0ec5c59bd9a004903a245818a",
+                    "date": "2026-04-09T12:00:00+00:00",
+                    "message": "release: ship 1.2.3"
+                }
+            }
+        ]
+    }
+
+    with respx.mock:
+        route = respx.get(tags_url).mock(return_value=httpx.Response(200, json=response_payload))
+        async with BitbucketClient("test@example.com", "token", "workspace") as client:
+            result = await client.get_repository_tags("my-repo", page_size=10)
+
+        assert result["values"][0]["name"] == "v1.2.3"
+        assert route.calls.last.request.url.params["sort"] == "-target.date"
+        assert route.calls.last.request.url.params["pagelen"] == "10"
+
+
+@pytest.mark.asyncio
+async def test_get_repository_tags_aggregates_multiple_pages_without_truncation():
+    """max_pages>1 must aggregate every page — no manual truncation back to page_size."""
+    base_url = "https://api.bitbucket.org/2.0/repositories/workspace/my-repo/refs/tags"
+    page1 = {
+        "pagelen": 10,
+        "size": 20,
+        "page": 1,
+        "values": [
+            {"name": f"v1.0.{i}", "target": {"hash": "a" * 40, "date": "2026-01-01T00:00:00+00:00"}}
+            for i in range(10)
+        ],
+        "next": f"{base_url}?page=2",
+    }
+    page2 = {
+        "pagelen": 10,
+        "size": 20,
+        "page": 2,
+        "values": [
+            {"name": f"v2.0.{i}", "target": {"hash": "b" * 40, "date": "2026-01-01T00:00:00+00:00"}}
+            for i in range(10)
+        ],
+    }
+
+    def response_handler(request):
+        if "page=2" in str(request.url):
+            return httpx.Response(200, json=page2)
+        return httpx.Response(200, json=page1)
+
+    with respx.mock:
+        respx.get(url__regex=r"https://api\.bitbucket\.org/2\.0/repositories/workspace/my-repo/refs/tags").mock(
+            side_effect=response_handler
+        )
+        async with BitbucketClient("test@example.com", "token", "workspace") as client:
+            result = await client.get_repository_tags("my-repo", page_size=10, max_pages=2)
+
+    # Both pages aggregated, nothing truncated to page_size
+    assert len(result["values"]) == 20
+    assert result["values"][0]["name"] == "v1.0.0"
+    assert result["values"][-1]["name"] == "v2.0.9"
 
 
 def test_request_changes_methods_exist():

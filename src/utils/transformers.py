@@ -57,6 +57,25 @@ def slim_repository_list(data: Dict[str, Any]) -> Dict[str, Any]:
     return _slim_paginated(data, slim_repository)
 
 
+def slim_tag(tag: Dict[str, Any]) -> Dict[str, Any]:
+    """Slim a single repository tag."""
+    target = tag.get("target") or {}
+    tagger = tag.get("tagger") or {}
+    date = target.get("date") or tagger.get("date") or tag.get("date")
+    message = target.get("message") or tag.get("message")
+    return {
+        "name": tag.get("name"),
+        "date": date,
+        "target_hash": target.get("hash", "")[:12],
+        "message": message,
+    }
+
+
+def slim_tag_list(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Slim a paginated list of repository tags."""
+    return _slim_paginated(data, slim_tag)
+
+
 # ========== Pull Requests ==========
 
 def slim_pull_request_list_item(pr: Dict[str, Any]) -> Dict[str, Any]:
