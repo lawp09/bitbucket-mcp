@@ -391,3 +391,66 @@ def slim_reviewer(reviewer: Dict[str, Any]) -> Dict[str, Any]:
 def slim_reviewer_list(data: Dict[str, Any]) -> Dict[str, Any]:
     """Slim a paginated list of default reviewers."""
     return _slim_paginated(data, slim_reviewer)
+
+
+# ========== Issues ==========
+
+def _slim_issue_user(user: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Like _slim_user but keeps the uuid.
+
+    Issues identify assignees/reporters by uuid (filtering via assignee.uuid,
+    create/update via {"uuid": ...}); keeping it lets a consumer read a uuid from
+    get_issue/list_issues and reuse it to reassign or filter.
+    """
+    slimmed = _slim_user(user)
+    if slimmed is not None:
+        slimmed["uuid"] = (user or {}).get("uuid")
+    return slimmed
+
+
+def slim_issue(issue: Dict[str, Any]) -> Dict[str, Any]:
+    """Slim a single issue object."""
+    content = issue.get("content") or {}
+    component = issue.get("component") or {}
+    milestone = issue.get("milestone") or {}
+    return {
+        "id": issue.get("id"),
+        "title": issue.get("title"),
+        "content": content.get("raw"),
+        "state": issue.get("state"),
+        "kind": issue.get("kind"),
+        "priority": issue.get("priority"),
+        "reporter": _slim_issue_user(issue.get("reporter")),
+        "assignee": _slim_issue_user(issue.get("assignee")),
+        "component": component.get("name"),
+        "milestone": milestone.get("name"),
+        "votes": issue.get("votes"),
+        "watches": issue.get("watches"),
+        "created_on": issue.get("created_on"),
+        "updated_on": issue.get("updated_on"),
+    }
+
+
+def slim_issue_list(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Slim a paginated list of issues."""
+    return _slim_paginated(data, slim_issue)
+
+
+def slim_issue_comment(comment: Dict[str, Any]) -> Dict[str, Any]:
+    """Slim a single issue comment.
+
+    Issue comments are not resolvable (unlike PR comments), so no resolution fields.
+    """
+    content = comment.get("content") or {}
+    return {
+        "id": comment.get("id"),
+        "content": content.get("raw"),
+        "author": _slim_user(comment.get("user")),
+        "created_on": comment.get("created_on"),
+        "updated_on": comment.get("updated_on"),
+    }
+
+
+def slim_issue_comment_list(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Slim a paginated list of issue comments."""
+    return _slim_paginated(data, slim_issue_comment)

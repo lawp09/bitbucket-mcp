@@ -10,6 +10,95 @@ from .utils.pagination import PaginationConfig, aggregate_pages
 logger = logging.getLogger(__name__)
 
 
+class IssueTrackerDisabledError(Exception):
+    """Raised when an issue endpoint returns 404 because the repository's issue
+    tracker is disabled.
+
+    The Bitbucket issue tracker is opt-in per repository; calls to issue endpoints
+    on a repository without one return a 404. This typed exception lets the server
+    layer surface a clear, structured error instead of a raw HTTP failure.
+    """
+
+    def __init__(self, workspace: str, repo_slug: str):
+        self.workspace = workspace
+        self.repo_slug = repo_slug
+        super().__init__(
+            f"Issue tracker is disabled for repository '{workspace}/{repo_slug}'."
+        )
+
+
+# Observed disabled-tracker body: {"error": {"message": "Repository has no issue tracker."}}.
+# Substring match keeps it resilient to minor wording changes around "no issue tracker".
+_TRACKER_DISABLED_MARKER = "no issue tracker"
+
+
+def _is_tracker_disabled_response(response: httpx.Response) -> bool:
+    """Return True if a 404 response indicates the issue tracker is disabled.
+
+    Distinguishes a "tracker disabled" 404 (e.g. "Repository has no issue tracker.")
+    from a regular "issue not found" 404 by inspecting the error message in the body.
+    A not-found 404 is left to propagate as a normal HTTP error.
+    """
+    if response.status_code != 404:
+        return False
+    try:
+        message = response.json().get("error", {}).get("message", "")
+    except Exception:
+        message = response.text
+    return _TRACKER_DISABLED_MARKER in (message or "").lower()
+
+
+def _raise_if_tracker_disabled(
+    response: httpx.Response, workspace: str, repo_slug: str
+) -> None:
+    """Raise IssueTrackerDisabledError if the response is a tracker-disabled 404.
+
+    Shared guard for the direct (non-paginated) issue endpoints so the detection
+    stays in one place and cannot be forgotten on a new method.
+    """
+    if _is_tracker_disabled_response(response):
+        raise IssueTrackerDisabledError(workspace, repo_slug)
+
+
+def _bbql_quote(value: str) -> str:
+    """Escape and wrap a string value for a BBQL query."""
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def _build_issue_query(
+    state: Optional[str] = None,
+    kind: Optional[str] = None,
+    priority: Optional[str] = None,
+    assignee: Optional[str] = None,
+    q: Optional[str] = None,
+) -> Optional[str]:
+    """Combine dedicated filters and a raw BBQL query into a single BBQL string.
+
+    Dedicated filters and the raw query are joined with AND; the raw query is
+    wrapped in parentheses to preserve operator precedence.
+
+    Example:
+        _build_issue_query(state="open", kind="bug")
+        -> 'state = "open" AND kind = "bug"'
+
+    Returns:
+        The combined BBQL query string, or None when no filter is provided.
+    """
+    clauses = []
+    if state:
+        clauses.append(f"state = {_bbql_quote(state)}")
+    if kind:
+        clauses.append(f"kind = {_bbql_quote(kind)}")
+    if priority:
+        clauses.append(f"priority = {_bbql_quote(priority)}")
+    if assignee:
+        clauses.append(f"assignee.uuid = {_bbql_quote(assignee)}")
+    if q:
+        clauses.append(f"({q})")
+    return " AND ".join(clauses) if clauses else None
+
+
 class BitbucketClient:
     """Async HTTP client for Bitbucket API 2.0 with Basic Auth"""
 
@@ -1380,3 +1469,380 @@ class BitbucketClient:
         )
         response.raise_for_status()
         return response.json()
+
+    # ========== Issues ==========
+
+    async def list_issues(
+        self,
+        repo_slug: str,
+        workspace: Optional[str] = None,
+        state: Optional[str] = None,
+        kind: Optional[str] = None,
+        priority: Optional[str] = None,
+        assignee: Optional[str] = None,
+        q: Optional[str] = None,
+        sort: str = "-created_on",
+        page_size: int = 20,
+        max_pages: Optional[int] = 1,
+        max_items: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        List issues in a repository's issue tracker with filtering and pagination.
+
+        Args:
+            repo_slug: Repository slug
+            workspace: Workspace name (defaults to self.workspace)
+            state: Filter by state (new, open, resolved, on hold, invalid, duplicate, wontfix, closed)
+            kind: Filter by kind (bug, enhancement, proposal, task)
+            priority: Filter by priority (trivial, minor, major, critical, blocker)
+            assignee: Filter by assignee uuid
+            q: Raw BBQL query, combined with the other filters using AND. Passed
+               through verbatim (NOT escaped) — unlike the dedicated filters.
+            sort: Sort field (default: -created_on for most recent first)
+            page_size: Items per page (default: 20)
+            max_pages: Maximum pages to fetch (default: 1)
+            max_items: Maximum total items to fetch (default: None)
+
+        Returns:
+            Paginated list of issues with aggregated values
+
+        Raises:
+            IssueTrackerDisabledError: If the repository has no issue tracker enabled
+        """
+        ws = workspace or self.workspace
+        config = PaginationConfig(
+            page_size=page_size, max_pages=max_pages, max_items=max_items
+        )
+        params: Dict[str, Any] = {"sort": sort}
+        query = _build_issue_query(state, kind, priority, assignee, q)
+        if query:
+            params["q"] = query
+        try:
+            return await aggregate_pages(
+                self.client,
+                f"/repositories/{ws}/{repo_slug}/issues",
+                params,
+                config,
+            )
+        except httpx.HTTPStatusError as exc:
+            if _is_tracker_disabled_response(exc.response):
+                raise IssueTrackerDisabledError(ws, repo_slug) from exc
+            raise
+
+    async def get_issue(
+        self,
+        repo_slug: str,
+        issue_id: str,
+        workspace: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Get details for a specific issue.
+
+        Args:
+            repo_slug: Repository slug
+            issue_id: Issue ID
+            workspace: Workspace name (defaults to self.workspace)
+
+        Returns:
+            Issue details
+
+        Raises:
+            IssueTrackerDisabledError: If the repository has no issue tracker enabled
+        """
+        ws = workspace or self.workspace
+        response = await self.client.get(
+            f"/repositories/{ws}/{repo_slug}/issues/{issue_id}"
+        )
+        _raise_if_tracker_disabled(response, ws, repo_slug)
+        response.raise_for_status()
+        return response.json()
+
+    async def create_issue(
+        self,
+        repo_slug: str,
+        title: str,
+        content: Optional[str] = None,
+        kind: Optional[str] = None,
+        priority: Optional[str] = None,
+        assignee: Optional[str] = None,
+        state: Optional[str] = None,
+        workspace: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Create a new issue.
+
+        Args:
+            repo_slug: Repository slug
+            title: Issue title
+            content: Issue description in markdown (optional)
+            kind: Issue kind (bug, enhancement, proposal, task) (optional)
+            priority: Issue priority (trivial, minor, major, critical, blocker) (optional)
+            assignee: Assignee uuid (optional)
+            state: Initial state (optional)
+            workspace: Workspace name (defaults to self.workspace)
+
+        Returns:
+            Created issue details
+
+        Raises:
+            IssueTrackerDisabledError: If the repository has no issue tracker enabled
+        """
+        ws = workspace or self.workspace
+        payload: Dict[str, Any] = {"title": title}
+        if content is not None:
+            payload["content"] = {"raw": content}
+        if kind is not None:
+            payload["kind"] = kind
+        if priority is not None:
+            payload["priority"] = priority
+        if assignee is not None:
+            payload["assignee"] = {"uuid": assignee}
+        if state is not None:
+            payload["state"] = state
+        response = await self.client.post(
+            f"/repositories/{ws}/{repo_slug}/issues",
+            json=payload,
+        )
+        _raise_if_tracker_disabled(response, ws, repo_slug)
+        response.raise_for_status()
+        return response.json()
+
+    async def update_issue(
+        self,
+        repo_slug: str,
+        issue_id: str,
+        title: Optional[str] = None,
+        content: Optional[str] = None,
+        state: Optional[str] = None,
+        kind: Optional[str] = None,
+        priority: Optional[str] = None,
+        assignee: Optional[str] = None,
+        workspace: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Update an issue (partial update — only provided fields are changed).
+
+        Args:
+            repo_slug: Repository slug
+            issue_id: Issue ID
+            title: New title (optional)
+            content: New description in markdown (optional)
+            state: New state (optional)
+            kind: New kind (optional)
+            priority: New priority (optional)
+            assignee: New assignee uuid (optional)
+            workspace: Workspace name (defaults to self.workspace)
+
+        Returns:
+            Updated issue details
+
+        Raises:
+            IssueTrackerDisabledError: If the repository has no issue tracker enabled
+        """
+        ws = workspace or self.workspace
+        payload: Dict[str, Any] = {}
+        if title is not None:
+            payload["title"] = title
+        if content is not None:
+            payload["content"] = {"raw": content}
+        if state is not None:
+            payload["state"] = state
+        if kind is not None:
+            payload["kind"] = kind
+        if priority is not None:
+            payload["priority"] = priority
+        if assignee is not None:
+            payload["assignee"] = {"uuid": assignee}
+        response = await self.client.put(
+            f"/repositories/{ws}/{repo_slug}/issues/{issue_id}",
+            json=payload,
+        )
+        _raise_if_tracker_disabled(response, ws, repo_slug)
+        response.raise_for_status()
+        return response.json()
+
+    async def delete_issue(
+        self,
+        repo_slug: str,
+        issue_id: str,
+        workspace: Optional[str] = None,
+    ) -> None:
+        """
+        Delete an issue.
+
+        Args:
+            repo_slug: Repository slug
+            issue_id: Issue ID
+            workspace: Workspace name (defaults to self.workspace)
+
+        Raises:
+            IssueTrackerDisabledError: If the repository has no issue tracker enabled
+        """
+        ws = workspace or self.workspace
+        response = await self.client.delete(
+            f"/repositories/{ws}/{repo_slug}/issues/{issue_id}"
+        )
+        _raise_if_tracker_disabled(response, ws, repo_slug)
+        response.raise_for_status()
+
+    async def get_issue_comments(
+        self,
+        repo_slug: str,
+        issue_id: str,
+        workspace: Optional[str] = None,
+        page_size: int = 20,
+        max_pages: Optional[int] = 1,
+        max_items: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        List comments on an issue with pagination support.
+
+        Args:
+            repo_slug: Repository slug
+            issue_id: Issue ID
+            workspace: Workspace name (defaults to self.workspace)
+            page_size: Items per page (default: 20)
+            max_pages: Maximum pages to fetch (default: 1)
+            max_items: Maximum total items to fetch (default: None)
+
+        Returns:
+            Paginated list of issue comments with aggregated values
+
+        Raises:
+            IssueTrackerDisabledError: If the repository has no issue tracker enabled
+        """
+        ws = workspace or self.workspace
+        config = PaginationConfig(
+            page_size=page_size, max_pages=max_pages, max_items=max_items
+        )
+        try:
+            return await aggregate_pages(
+                self.client,
+                f"/repositories/{ws}/{repo_slug}/issues/{issue_id}/comments",
+                {},
+                config,
+            )
+        except httpx.HTTPStatusError as exc:
+            if _is_tracker_disabled_response(exc.response):
+                raise IssueTrackerDisabledError(ws, repo_slug) from exc
+            raise
+
+    async def get_issue_comment(
+        self,
+        repo_slug: str,
+        issue_id: str,
+        comment_id: str,
+        workspace: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Get a specific comment on an issue.
+
+        Args:
+            repo_slug: Repository slug
+            issue_id: Issue ID
+            comment_id: Comment ID
+            workspace: Workspace name (defaults to self.workspace)
+
+        Returns:
+            Issue comment details
+
+        Raises:
+            IssueTrackerDisabledError: If the repository has no issue tracker enabled
+        """
+        ws = workspace or self.workspace
+        response = await self.client.get(
+            f"/repositories/{ws}/{repo_slug}/issues/{issue_id}/comments/{comment_id}"
+        )
+        _raise_if_tracker_disabled(response, ws, repo_slug)
+        response.raise_for_status()
+        return response.json()
+
+    async def add_issue_comment(
+        self,
+        repo_slug: str,
+        issue_id: str,
+        content: str,
+        workspace: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Add a comment to an issue.
+
+        Args:
+            repo_slug: Repository slug
+            issue_id: Issue ID
+            content: Comment content in markdown
+            workspace: Workspace name (defaults to self.workspace)
+
+        Returns:
+            Created issue comment details
+
+        Raises:
+            IssueTrackerDisabledError: If the repository has no issue tracker enabled
+        """
+        ws = workspace or self.workspace
+        response = await self.client.post(
+            f"/repositories/{ws}/{repo_slug}/issues/{issue_id}/comments",
+            json={"content": {"raw": content}},
+        )
+        _raise_if_tracker_disabled(response, ws, repo_slug)
+        response.raise_for_status()
+        return response.json()
+
+    async def update_issue_comment(
+        self,
+        repo_slug: str,
+        issue_id: str,
+        comment_id: str,
+        content: str,
+        workspace: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Update a comment on an issue.
+
+        Args:
+            repo_slug: Repository slug
+            issue_id: Issue ID
+            comment_id: Comment ID
+            content: New comment content in markdown
+            workspace: Workspace name (defaults to self.workspace)
+
+        Returns:
+            Updated issue comment details
+
+        Raises:
+            IssueTrackerDisabledError: If the repository has no issue tracker enabled
+        """
+        ws = workspace or self.workspace
+        response = await self.client.put(
+            f"/repositories/{ws}/{repo_slug}/issues/{issue_id}/comments/{comment_id}",
+            json={"content": {"raw": content}},
+        )
+        _raise_if_tracker_disabled(response, ws, repo_slug)
+        response.raise_for_status()
+        return response.json()
+
+    async def delete_issue_comment(
+        self,
+        repo_slug: str,
+        issue_id: str,
+        comment_id: str,
+        workspace: Optional[str] = None,
+    ) -> None:
+        """
+        Delete a comment on an issue.
+
+        Args:
+            repo_slug: Repository slug
+            issue_id: Issue ID
+            comment_id: Comment ID
+            workspace: Workspace name (defaults to self.workspace)
+
+        Raises:
+            IssueTrackerDisabledError: If the repository has no issue tracker enabled
+        """
+        ws = workspace or self.workspace
+        response = await self.client.delete(
+            f"/repositories/{ws}/{repo_slug}/issues/{issue_id}/comments/{comment_id}"
+        )
+        _raise_if_tracker_disabled(response, ws, repo_slug)
+        response.raise_for_status()

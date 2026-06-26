@@ -1,6 +1,7 @@
 """MCP Server for Bitbucket API"""
 
 import asyncio
+import functools
 import os
 import sys
 import json
@@ -8,7 +9,7 @@ import logging
 from pathlib import Path
 from typing import Optional, Dict, Any
 from mcp.server.fastmcp import FastMCP
-from .client import BitbucketClient
+from .client import BitbucketClient, IssueTrackerDisabledError
 from .utils.credentials import get_credentials
 from .utils.transformers import (
     slim_repository, slim_repository_list, slim_tag_list,
@@ -22,6 +23,8 @@ from .utils.transformers import (
     slim_pipeline_step_list,
     slim_reviewer_list,
     slim_task, slim_task_list,
+    slim_issue, slim_issue_list,
+    slim_issue_comment, slim_issue_comment_list,
 )
 
 # Configuration logging vers stderr uniquement (container-friendly)
@@ -1702,3 +1705,343 @@ async def suggest_pull_request_reviewers(
             "historical_approvers": len(approver_counts)
         }
     }
+
+
+# ========== Issue Tracker Tools ==========
+
+def _handle_issue_tracker(func):
+    """Convert IssueTrackerDisabledError into a structured error dict.
+
+    The Bitbucket issue tracker is opt-in per repository. When it is disabled, the
+    API returns 404; rather than surface a raw HTTP error, issue tools return a
+    clear structured payload so LLM clients can react gracefully.
+
+    functools.wraps is required so FastMCP rebuilds the tool schema from the
+    wrapped function's signature.
+    """
+    @functools.wraps(func)
+    async def wrapper(*args, **kwargs):
+        try:
+            return await func(*args, **kwargs)
+        except IssueTrackerDisabledError as exc:
+            return {
+                "error": "issue_tracker_disabled",
+                "message": str(exc),
+                "workspace": exc.workspace,
+                "repo_slug": exc.repo_slug,
+            }
+    return wrapper
+
+
+@conditional_tool()
+@_handle_issue_tracker
+async def list_issues(
+    repo_slug: str,
+    workspace: Optional[str] = None,
+    state: Optional[str] = None,
+    kind: Optional[str] = None,
+    priority: Optional[str] = None,
+    assignee: Optional[str] = None,
+    q: Optional[str] = None,
+    sort: str = "-created_on",
+    page_size: int = 20,
+    max_pages: Optional[int] = 1,
+    max_items: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    List issues in a repository's issue tracker, with filtering and pagination.
+
+    Args:
+        repo_slug: Repository slug
+        workspace: Workspace name (optional, defaults to configured workspace)
+        state: Filter by state (new, open, resolved, on hold, invalid, duplicate, wontfix, closed)
+        kind: Filter by kind (bug, enhancement, proposal, task)
+        priority: Filter by priority (trivial, minor, major, critical, blocker)
+        assignee: Filter by assignee uuid
+        q: Raw BBQL query, combined with the other filters using AND
+           (e.g. 'created_on > 2024-01-01'). Passed through verbatim (not escaped).
+        sort: Sort field (default: -created_on for most recent first)
+        page_size: Items per page (default: 20)
+        max_pages: Maximum pages to fetch (default: 1, max recommended: 10)
+        max_items: Maximum total items to fetch (default: None)
+
+    Returns:
+        Paginated list of issues. If the repository has no issue tracker, returns
+        {"error": "issue_tracker_disabled", ...}.
+
+    Note:
+        Fetching more than 10 pages or 300 items will trigger a warning.
+    """
+    client = get_client()
+    result = await client.list_issues(
+        repo_slug, workspace, state, kind, priority, assignee, q, sort,
+        page_size, max_pages, max_items,
+    )
+    return slim_issue_list(result)
+
+
+@conditional_tool()
+@_handle_issue_tracker
+async def get_issue(
+    repo_slug: str,
+    issue_id: str,
+    workspace: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Get details for a specific issue.
+
+    Args:
+        repo_slug: Repository slug
+        issue_id: Issue ID
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Issue details. If the repository has no issue tracker, returns
+        {"error": "issue_tracker_disabled", ...}.
+    """
+    client = get_client()
+    result = await client.get_issue(repo_slug, issue_id, workspace)
+    return slim_issue(result)
+
+
+@conditional_tool()
+@_handle_issue_tracker
+async def create_issue(
+    repo_slug: str,
+    title: str,
+    content: Optional[str] = None,
+    kind: Optional[str] = None,
+    priority: Optional[str] = None,
+    assignee: Optional[str] = None,
+    state: Optional[str] = None,
+    workspace: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Create a new issue in a repository's issue tracker.
+
+    Args:
+        repo_slug: Repository slug
+        title: Issue title
+        content: Issue description in markdown (optional)
+        kind: Issue kind: bug, enhancement, proposal, task (optional)
+        priority: Issue priority: trivial, minor, major, critical, blocker (optional)
+        assignee: Assignee uuid (optional)
+        state: Initial state (optional, e.g. new, open)
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Created issue details. If the repository has no issue tracker, returns
+        {"error": "issue_tracker_disabled", ...}.
+    """
+    client = get_client()
+    result = await client.create_issue(
+        repo_slug, title, content, kind, priority, assignee, state, workspace
+    )
+    return slim_issue(result)
+
+
+@conditional_tool()
+@_handle_issue_tracker
+async def update_issue(
+    repo_slug: str,
+    issue_id: str,
+    title: Optional[str] = None,
+    content: Optional[str] = None,
+    state: Optional[str] = None,
+    kind: Optional[str] = None,
+    priority: Optional[str] = None,
+    assignee: Optional[str] = None,
+    workspace: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Update an issue (only the provided fields are changed).
+
+    Args:
+        repo_slug: Repository slug
+        issue_id: Issue ID
+        title: New title (optional)
+        content: New description in markdown (optional)
+        state: New state: new, open, resolved, on hold, invalid, duplicate, wontfix, closed (optional)
+        kind: New kind: bug, enhancement, proposal, task (optional)
+        priority: New priority: trivial, minor, major, critical, blocker (optional)
+        assignee: New assignee uuid (optional)
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Updated issue details. If the repository has no issue tracker, returns
+        {"error": "issue_tracker_disabled", ...}.
+    """
+    if all(v is None for v in (title, content, state, kind, priority, assignee)):
+        raise ValueError("At least one field to update must be provided")
+    client = get_client()
+    result = await client.update_issue(
+        repo_slug, issue_id, title, content, state, kind, priority, assignee, workspace
+    )
+    return slim_issue(result)
+
+
+@conditional_tool()
+@_handle_issue_tracker
+async def delete_issue(
+    repo_slug: str,
+    issue_id: str,
+    workspace: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Delete an issue.
+
+    Args:
+        repo_slug: Repository slug
+        issue_id: Issue ID
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Confirmation {"deleted": True, "issue_id": ...}. If the repository has no
+        issue tracker, returns {"error": "issue_tracker_disabled", ...}.
+    """
+    client = get_client()
+    await client.delete_issue(repo_slug, issue_id, workspace)
+    return {"deleted": True, "issue_id": issue_id}
+
+
+@conditional_tool()
+@_handle_issue_tracker
+async def get_issue_comments(
+    repo_slug: str,
+    issue_id: str,
+    workspace: Optional[str] = None,
+    page_size: int = 20,
+    max_pages: Optional[int] = 1,
+    max_items: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    List comments on an issue with pagination support.
+
+    Args:
+        repo_slug: Repository slug
+        issue_id: Issue ID
+        workspace: Workspace name (optional, defaults to configured workspace)
+        page_size: Items per page (default: 20, max recommended: 100)
+        max_pages: Maximum pages to fetch (default: 1, max recommended: 10)
+        max_items: Maximum total items to fetch (default: None)
+
+    Returns:
+        Paginated list of issue comments. If the repository has no issue tracker,
+        returns {"error": "issue_tracker_disabled", ...}.
+
+    Note:
+        Fetching more than 10 pages or 300 items will trigger a warning.
+    """
+    client = get_client()
+    result = await client.get_issue_comments(
+        repo_slug, issue_id, workspace, page_size, max_pages, max_items
+    )
+    return slim_issue_comment_list(result)
+
+
+@conditional_tool()
+@_handle_issue_tracker
+async def get_issue_comment(
+    repo_slug: str,
+    issue_id: str,
+    comment_id: str,
+    workspace: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Get a specific comment on an issue.
+
+    Args:
+        repo_slug: Repository slug
+        issue_id: Issue ID
+        comment_id: Comment ID
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Issue comment details. If the repository has no issue tracker, returns
+        {"error": "issue_tracker_disabled", ...}.
+    """
+    client = get_client()
+    result = await client.get_issue_comment(repo_slug, issue_id, comment_id, workspace)
+    return slim_issue_comment(result)
+
+
+@conditional_tool()
+@_handle_issue_tracker
+async def add_issue_comment(
+    repo_slug: str,
+    issue_id: str,
+    content: str,
+    workspace: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Add a comment to an issue.
+
+    Args:
+        repo_slug: Repository slug
+        issue_id: Issue ID
+        content: Comment content in markdown
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Created issue comment details. If the repository has no issue tracker,
+        returns {"error": "issue_tracker_disabled", ...}.
+    """
+    client = get_client()
+    result = await client.add_issue_comment(repo_slug, issue_id, content, workspace)
+    return slim_issue_comment(result)
+
+
+@conditional_tool()
+@_handle_issue_tracker
+async def update_issue_comment(
+    repo_slug: str,
+    issue_id: str,
+    comment_id: str,
+    content: str,
+    workspace: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Update a comment on an issue.
+
+    Args:
+        repo_slug: Repository slug
+        issue_id: Issue ID
+        comment_id: Comment ID
+        content: New comment content in markdown
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Updated issue comment details. If the repository has no issue tracker,
+        returns {"error": "issue_tracker_disabled", ...}.
+    """
+    client = get_client()
+    result = await client.update_issue_comment(
+        repo_slug, issue_id, comment_id, content, workspace
+    )
+    return slim_issue_comment(result)
+
+
+@conditional_tool()
+@_handle_issue_tracker
+async def delete_issue_comment(
+    repo_slug: str,
+    issue_id: str,
+    comment_id: str,
+    workspace: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Delete a comment on an issue.
+
+    Args:
+        repo_slug: Repository slug
+        issue_id: Issue ID
+        comment_id: Comment ID
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Confirmation {"deleted": True, "comment_id": ...}. If the repository has no
+        issue tracker, returns {"error": "issue_tracker_disabled", ...}.
+    """
+    client = get_client()
+    await client.delete_issue_comment(repo_slug, issue_id, comment_id, workspace)
+    return {"deleted": True, "comment_id": comment_id}

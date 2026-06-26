@@ -1,5 +1,13 @@
 # Changelog - Bitbucket MCP Server Python
 
+## [1.17.0] - 2026-06-26
+
+### Added
+- Bitbucket Issue Tracker support — 10 new MCP tools: `list_issues` (filter by `state`/`kind`/`priority`/`assignee` plus raw BBQL `q` and `sort`), `get_issue`, `create_issue`, `update_issue`, `delete_issue` (disabled by default), `get_issue_comments`, `get_issue_comment`, `add_issue_comment`, `update_issue_comment`, `delete_issue_comment` (disabled by default). Slim responses (`slim_issue` / `slim_issue_comment`) and pagination throughout. (#50)
+- Graceful failure when a repository's issue tracker is disabled — issue tools return `{"error": "issue_tracker_disabled", ...}` instead of a raw 404 (the tracker is opt-in per repository)
+
+---
+
 ## [1.16.1] - 2026-06-26
 
 ### Changed

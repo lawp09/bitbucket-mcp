@@ -12,7 +12,7 @@ Connect **Claude Code**, **OpenAI Codex**, **Cursor**, **VS Code (GitHub Copilot
 
 ## Features
 
-- **46 MCP tools** — repositories, pull requests, comments, tasks, diffs, pipelines, build statuses, reviewers, draft PRs, batch review
+- **56 MCP tools** — repositories, pull requests, comments, tasks, diffs, pipelines, build statuses, reviewers, draft PRs, batch review, issue tracker
 - **Slim responses** — stripped API noise for lower LLM token usage
 - **Configurable** — enable/disable tools via `configs/tools.json` or `BITBUCKET_TOOLS_CONFIG` env var
 - **Secure credentials** — environment variables or system keychain
@@ -169,8 +169,9 @@ Add to `.vscode/mcp.json` (workspace) or `~/Library/Application Support/Code/Use
 | **Draft PR** | `create_draft_pull_request`, `publish_draft_pull_request`, `convert_pull_request_to_draft` |
 | **Batch Review** | `submit_pull_request_batch_review` |
 | **Review Summary** | `get_pull_request_review_summary` |
+| **Issues** | `list_issues`, `get_issue`, `create_issue`, `update_issue`, `delete_issue`, `get_issue_comments`, `get_issue_comment`, `add_issue_comment`, `update_issue_comment`, `delete_issue_comment` |
 
-> Disabled by default: `merge_pull_request` (safety), `stop_pipeline` (safety), `get_pull_request_patch` (git am format — not useful for AI review), `convert_pull_request_to_draft` (not supported by Bitbucket API). Enable in `configs/tools.json`.
+> Disabled by default: `merge_pull_request` (safety), `stop_pipeline` (safety), `get_pull_request_patch` (git am format — not useful for AI review), `convert_pull_request_to_draft` (not supported by Bitbucket API), `delete_issue` (safety), `delete_issue_comment` (safety). Enable in `configs/tools.json`.
 
 ### Custom tool configuration
 
