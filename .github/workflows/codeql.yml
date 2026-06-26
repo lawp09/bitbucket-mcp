@@ -10,11 +10,18 @@ on:
 
 permissions:
   contents: read
-  security-events: write
 
 jobs:
   analyze:
+    # Run on push/schedule and internal PRs; skip on fork PRs — CodeQL cannot
+    # upload SARIF from a fork (read-only GITHUB_TOKEN, no security-events:write).
+    # A skipped job reports "success", so the required "analyze" check never
+    # blocks fork PRs (the maintainer still finalizes those).
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - uses: actions/checkout@v4
 
