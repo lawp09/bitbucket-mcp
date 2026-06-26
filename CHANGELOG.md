@@ -1,5 +1,13 @@
 # Changelog - Bitbucket MCP Server Python
 
+## [1.16.1] - 2026-06-26
+
+### Changed
+- Documentation — add OpenAI Codex client setup (CLI `codex mcp add` + `~/.codex/config.toml`); client priority order: Claude Code → OpenAI Codex → Cursor → VS Code (GitHub Copilot)
+- PyPI keywords — add `openai-codex`
+
+---
+
 ## [1.16.0] - 2026-06-26
 
 ### Added
