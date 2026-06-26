@@ -37,6 +37,14 @@ claude mcp add bitbucket-mcp \
 }
 ```
 
+**OpenAI Codex TOML config** (`~/.codex/config.toml`):
+```toml
+[mcp_servers.bitbucket-mcp]
+command = "uvx"
+args = ["--from", "bitbucket-mcp-py", "bitbucket-mcp"]
+env = { BITBUCKET_USERNAME = "your-email@example.com", BITBUCKET_TOKEN = "your-api-token", BITBUCKET_WORKSPACE = "your-workspace" }
+```
+
 > **Note**: The PyPI package is `bitbucket-mcp-py` but the command entry point is `bitbucket-mcp`. The `--from` flag is required with `uvx`.
 
 ## Quick Commands

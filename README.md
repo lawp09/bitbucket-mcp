@@ -8,7 +8,7 @@
 [![CodeQL](https://github.com/lawp09/bitbucket-mcp/actions/workflows/codeql.yml/badge.svg)](https://github.com/lawp09/bitbucket-mcp/actions/workflows/codeql.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Connect **Claude Code**, **VS Code (GitHub Copilot)**, **Cursor**, and any MCP-compatible AI assistant to your Bitbucket Cloud repositories. Review pull requests, monitor pipelines, and manage your code — all through natural language.
+Connect **Claude Code**, **OpenAI Codex**, **Cursor**, **VS Code (GitHub Copilot)**, and any MCP-compatible AI assistant to your Bitbucket Cloud repositories. Review pull requests, monitor pipelines, and manage your code — all through natural language.
 
 ## Features
 
@@ -91,15 +91,35 @@ claude mcp add bitbucket-mcp \
 }
 ```
 
-#### VS Code (GitHub Copilot)
+#### OpenAI Codex
 
-Add to `.vscode/mcp.json` (workspace) or `~/Library/Application Support/Code/User/mcp.json` (global, macOS):
+**Option A — CLI (fastest):**
+
+```bash
+codex mcp add bitbucket-mcp \
+  --env BITBUCKET_USERNAME=your-email@example.com \
+  --env BITBUCKET_TOKEN=your-api-token \
+  --env BITBUCKET_WORKSPACE=your-workspace \
+  -- uvx --from bitbucket-mcp-py bitbucket-mcp
+```
+
+**Option B — TOML config** (`~/.codex/config.toml`):
+
+```toml
+[mcp_servers.bitbucket-mcp]
+command = "uvx"
+args = ["--from", "bitbucket-mcp-py", "bitbucket-mcp"]
+env = { BITBUCKET_USERNAME = "your-email@example.com", BITBUCKET_TOKEN = "your-api-token", BITBUCKET_WORKSPACE = "your-workspace" }
+```
+
+#### Cursor
+
+Add to `~/.cursor/mcp.json`:
 
 ```json
 {
-  "servers": {
+  "mcpServers": {
     "bitbucket-mcp": {
-      "type": "stdio",
       "command": "uvx",
       "args": ["--from", "bitbucket-mcp-py", "bitbucket-mcp"],
       "env": {
@@ -112,14 +132,15 @@ Add to `.vscode/mcp.json` (workspace) or `~/Library/Application Support/Code/Use
 }
 ```
 
-#### Cursor
+#### VS Code (GitHub Copilot)
 
-Add to `~/.cursor/mcp.json`:
+Add to `.vscode/mcp.json` (workspace) or `~/Library/Application Support/Code/User/mcp.json` (global, macOS):
 
 ```json
 {
-  "mcpServers": {
+  "servers": {
     "bitbucket-mcp": {
+      "type": "stdio",
       "command": "uvx",
       "args": ["--from", "bitbucket-mcp-py", "bitbucket-mcp"],
       "env": {

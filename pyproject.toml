@@ -8,7 +8,7 @@ requires-python = ">=3.12"
 authors = [
     { name = "Philippe Lawson" },
 ]
-keywords = ["mcp", "bitbucket", "api", "model-context-protocol", "mcp-server", "claude-code", "cursor", "github-copilot", "pull-request", "code-review", "bitbucket-cloud", "pipelines", "llm", "ai-assistant"]
+keywords = ["mcp", "bitbucket", "api", "model-context-protocol", "mcp-server", "claude-code", "openai-codex", "cursor", "github-copilot", "pull-request", "code-review", "bitbucket-cloud", "pipelines", "llm", "ai-assistant"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
