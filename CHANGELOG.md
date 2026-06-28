@@ -1,5 +1,16 @@
 # Changelog - Bitbucket MCP Server Python
 
+## [1.20.0] - 2026-06-28
+
+### Added
+- MCP 2025 Tool Annotations on every tool — `readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`. Clients (Claude Code, Cursor) use them to auto-include read-only tools without confirmation and to warn before destructive operations (merge, delete, stop). Classification is centralised in `conditional_tool` via a name-prefix rule (`get_`/`list_`/`create_`/`add_`/`update_`/`delete_`) plus an explicit override table for atypical verbs (`suggest_*` is read-only; toggles like `approve_`/`resolve_` are idempotent writes; `merge_`/`decline_`/`stop_pipeline` are destructive non-idempotent). `openWorldHint` is `False` everywhere (closed domain — a single known API).
+- Human-readable `title` (MCP 2025) on every tool — auto title-cased from the tool name, with a small override table for awkward labels.
+
+### Notes
+- Purely additive metadata — no tool signature or runtime behaviour changed, fully backward compatible. No new dependency (`ToolAnnotations` ships with `mcp`).
+
+---
+
 ## [1.19.0] - 2026-06-27
 
 ### Added

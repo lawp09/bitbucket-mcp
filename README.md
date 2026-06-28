@@ -13,6 +13,7 @@ Connect **Claude Code**, **OpenAI Codex**, **Cursor**, **VS Code (GitHub Copilot
 ## Features
 
 - **60+ MCP tools** — repositories, pull requests, comments, tasks, diffs, pipelines (runtime + config), build statuses, reviewers, draft PRs, batch review, issue tracker, commits, source/file browsing
+- **MCP 2025 tool annotations** — every tool advertises `readOnlyHint` / `destructiveHint` / `idempotentHint` / `openWorldHint` + a human-readable title, so clients (Claude Code, Cursor) auto-include read-only tools and warn before destructive operations
 - **Slim responses** — stripped API noise for lower LLM token usage
 - **Configurable** — enable/disable tools via `configs/tools.json` or `BITBUCKET_TOOLS_CONFIG` env var
 - **Secure credentials** — environment variables or system keychain

@@ -9,6 +9,7 @@ import logging
 from pathlib import Path
 from typing import Optional, Dict, Any
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 from .client import BitbucketClient, IssueTrackerDisabledError, DEFAULT_MAX_FILE_BYTES
 from .utils.credentials import get_credentials
 from .utils.transformers import (
@@ -128,12 +129,108 @@ def is_tool_enabled(tool_name: str) -> bool:
     return _enabled_tools.get(tool_name, True)
 
 
+# ========== MCP 2025 Tool Annotations ==========
+#
+# Each tool advertises behavioural hints (MCP spec 2025) so clients can reason about
+# safety: readOnlyHint, destructiveHint, idempotentHint, openWorldHint. Classification is
+# centralised here (single source of truth) rather than duplicated on the ~77 decorator
+# sites: a name-prefix rule covers the regular CRUD verbs, and an explicit override table
+# handles the atypical verbs (toggles, danger ops, read-only "suggest", ...).
+
+# Prefix rule → (readOnlyHint, destructiveHint, idempotentHint)
+_ANNOTATION_PREFIXES = {
+    "get_":    (True,  False, True),
+    "list_":   (True,  False, True),
+    "create_": (False, False, False),
+    "add_":    (False, False, False),
+    "update_": (False, False, True),
+    "delete_": (False, True,  True),
+}
+
+# Explicit overrides for verbs not covered by a prefix, or mis-classified by it.
+# Takes precedence over _ANNOTATION_PREFIXES.
+_ANNOTATION_OVERRIDES = {
+    # --- read-only despite a write-sounding verb ---
+    "suggest_pull_request_reviewers":   (True,  False, True),
+    # --- update-like, idempotent (state toggles) ---
+    "approve_pull_request":             (False, False, True),
+    "unapprove_pull_request":           (False, False, True),
+    "request_changes_pull_request":     (False, False, True),
+    "unrequest_changes_pull_request":   (False, False, True),
+    "resolve_pull_request_comment":     (False, False, True),
+    "reopen_pull_request_comment":      (False, False, True),
+    # publish/convert: idempotent by final-state (PR ends OPEN / DRAFT) even though
+    # Bitbucket returns an HTTP error on a redundant second call.
+    "publish_draft_pull_request":       (False, False, True),
+    "convert_pull_request_to_draft":    (False, False, True),
+    # --- create-like, non-idempotent (each call produces a new effect) ---
+    "run_pipeline":                     (False, False, False),
+    "submit_pull_request_batch_review": (False, False, False),
+    # --- DANGER: destructive, non-idempotent ---
+    "decline_pull_request":             (False, True,  False),
+    "merge_pull_request":               (False, True,  False),
+    "stop_pipeline":                    (False, True,  False),
+}
+
+# Human-readable titles. Only override names whose auto title-case is awkward/verbose;
+# never duplicate the auto value (that would be a dead override).
+_TITLE_OVERRIDES = {
+    "get_pull_requests_pending_review":  "List Pull Requests Pending Review",
+    "unrequest_changes_pull_request":    "Withdraw Change Request",
+    "request_changes_pull_request":      "Request Changes on Pull Request",
+    "submit_pull_request_batch_review":  "Submit Batch Review",
+    "get_effective_default_reviewers":   "Get Default Reviewers",
+    "list_pipeline_schedule_executions": "List Schedule Executions",
+}
+
+
+def _classify(tool_name: str):
+    """Return (readOnlyHint, destructiveHint, idempotentHint) for a tool name.
+
+    Resolution order: explicit override > name prefix > conservative fallback.
+    The fallback (treat as a non-idempotent write) should never be hit for the repo's
+    own tools — a test asserts every registered tool is covered by a prefix or override.
+    """
+    if tool_name in _ANNOTATION_OVERRIDES:
+        return _ANNOTATION_OVERRIDES[tool_name]
+    for prefix, hints in _ANNOTATION_PREFIXES.items():
+        if tool_name.startswith(prefix):
+            return hints
+    return (False, False, False)
+
+
+def _tool_annotations(tool_name: str) -> ToolAnnotations:
+    """Build the MCP ToolAnnotations for a tool (the four behavioural hints).
+
+    The human-readable title is intentionally NOT set here: it is passed top-level via
+    ``mcp.tool(title=...)`` (the canonical MCP 2025 field), avoiding an out-of-schema
+    ``annotations.title``. openWorldHint is False for every tool — they talk to a single
+    known API (api.bitbucket.org), a closed interaction domain.
+    """
+    read_only, destructive, idempotent = _classify(tool_name)
+    return ToolAnnotations(
+        readOnlyHint=read_only,
+        destructiveHint=destructive,
+        idempotentHint=idempotent,
+        openWorldHint=False,
+    )
+
+
+def _tool_title(tool_name: str) -> str:
+    """Return the human-readable title for a tool (override, else title-cased name)."""
+    if tool_name in _TITLE_OVERRIDES:
+        return _TITLE_OVERRIDES[tool_name]
+    return tool_name.replace("_", " ").title()
+
+
 def conditional_tool(structured_output: bool = True):
     """
     Decorator that conditionally registers a tool based on configuration.
 
-    If the tool is enabled in configs/tools.json, it will be registered as an MCP tool.
-    Otherwise, the function remains as a regular async function without MCP registration.
+    If the tool is enabled in configs/tools.json, it will be registered as an MCP tool
+    with a human-readable title and MCP 2025 behavioural annotations (derived centrally
+    from the tool name). Otherwise, the function remains as a regular async function
+    without MCP registration.
 
     Args:
         structured_output: If True, enable structured output for dict returns.
@@ -144,7 +241,11 @@ def conditional_tool(structured_output: bool = True):
         tool_name = func.__name__
         if is_tool_enabled(tool_name):
             logger.debug(f"Registering tool: {tool_name} (structured_output={structured_output})")
-            return mcp.tool(structured_output=structured_output)(func)
+            return mcp.tool(
+                structured_output=structured_output,
+                title=_tool_title(tool_name),
+                annotations=_tool_annotations(tool_name),
+            )(func)
         else:
             logger.info(f"Tool disabled by configuration: {tool_name}")
             return func
