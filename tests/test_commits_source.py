@@ -77,25 +77,32 @@ COMMIT_HASH = "abcdef1234567890"
 # ========== Transformers ==========
 
 class TestSlimSourceEntry:
-    def test_keeps_essential_fields_and_truncates_commit(self):
+    def test_keeps_essential_fields(self):
         result = slim_source_entry(SAMPLE_DIR_LISTING["values"][0])
         assert result["path"] == "src/app.py"
         assert result["type"] == "commit_file"
         assert result["size"] == 1024
         assert result["mimetype"] == "text/x-python"
-        assert result["commit"] == "abcdef123456"  # 12 chars
         assert "links" not in result
+        # commit is hoisted to the list level, not repeated per entry
+        assert "commit" not in result
 
     def test_directory_entry_has_no_size(self):
         result = slim_source_entry(SAMPLE_DIR_LISTING["values"][1])
         assert result["type"] == "commit_directory"
         assert result["size"] is None
-        assert result["commit"] is None
 
-    def test_source_list_aggregates(self):
+    def test_source_list_aggregates_and_hoists_commit(self):
         result = slim_source_list(SAMPLE_DIR_LISTING)
         assert result["count"] == 2
         assert result["values"][0]["path"] == "src/app.py"
+        # single top-level commit (12 chars) instead of one per entry
+        assert result["commit"] == "abcdef123456"
+        assert all("commit" not in e for e in result["values"])
+
+    def test_source_list_commit_none_when_absent(self):
+        result = slim_source_list({"values": [{"path": "x", "type": "commit_file"}], "page": 1})
+        assert result["commit"] is None
 
 
 class TestSlimCommitReuse:

@@ -220,6 +220,62 @@
       "stop_pipeline": {
         "enabled": false,
         "description": "Stop a running pipeline"
+      },
+      "get_pipeline_config": {
+        "enabled": true,
+        "description": "Get repository pipelines configuration (requires admin:repository scope)"
+      },
+      "list_pipeline_variables": {
+        "enabled": true,
+        "description": "List repository pipeline variables (secured values are masked)"
+      },
+      "get_pipeline_variable": {
+        "enabled": true,
+        "description": "Get a repository pipeline variable"
+      },
+      "create_pipeline_variable": {
+        "enabled": false,
+        "description": "Create a repository pipeline variable (disabled by default — write op)"
+      },
+      "update_pipeline_variable": {
+        "enabled": false,
+        "description": "Update a repository pipeline variable (disabled by default — write op)"
+      },
+      "delete_pipeline_variable": {
+        "enabled": false,
+        "description": "Delete a repository pipeline variable (disabled by default — safety)"
+      },
+      "list_pipeline_schedules": {
+        "enabled": true,
+        "description": "List pipeline schedules for a repository"
+      },
+      "get_pipeline_schedule": {
+        "enabled": true,
+        "description": "Get a pipeline schedule"
+      },
+      "list_pipeline_schedule_executions": {
+        "enabled": true,
+        "description": "List executions of a pipeline schedule"
+      },
+      "create_pipeline_schedule": {
+        "enabled": false,
+        "description": "Create a pipeline schedule (disabled by default — write op)"
+      },
+      "update_pipeline_schedule": {
+        "enabled": false,
+        "description": "Update a pipeline schedule (disabled by default — write op)"
+      },
+      "delete_pipeline_schedule": {
+        "enabled": false,
+        "description": "Delete a pipeline schedule (disabled by default — safety)"
+      },
+      "list_pipeline_caches": {
+        "enabled": true,
+        "description": "List pipeline caches for a repository"
+      },
+      "delete_pipeline_cache": {
+        "enabled": false,
+        "description": "Delete a pipeline cache (disabled by default — safety)"
       }
     },
     "reviewers": {

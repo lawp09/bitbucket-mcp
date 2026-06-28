@@ -1396,6 +1396,421 @@ class BitbucketClient:
         )
         response.raise_for_status()
 
+    # ========== Pipelines Config (variables, schedules, caches) ==========
+    #
+    # NOTE on paths: variables and schedules live under "pipelines_config"
+    # (underscore), but caches live under "pipelines-config" (HYPHEN). This API
+    # inconsistency is confirmed against the live API (the underscore caches path
+    # returns 404 "no API hosted at this URL").
+
+    async def get_pipeline_config(
+        self,
+        repo_slug: str,
+        workspace: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Get the repository pipelines configuration (enabled flag, build number).
+
+        Note: this endpoint requires the ``admin:repository`` scope. A token with
+        only read scopes receives a 403 whose body lists the missing privilege.
+
+        Args:
+            repo_slug: Repository slug
+            workspace: Workspace name (defaults to self.workspace)
+
+        Returns:
+            Pipelines configuration object
+        """
+        ws = workspace or self.workspace
+        response = await self.client.get(
+            f"/repositories/{ws}/{repo_slug}/pipelines_config"
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def list_pipeline_variables(
+        self,
+        repo_slug: str,
+        workspace: Optional[str] = None,
+        page_size: int = 20,
+        max_pages: Optional[int] = 1,
+    ) -> Dict[str, Any]:
+        """
+        List repository-level pipeline variables with pagination support.
+
+        Secured variables never include their value in the response.
+
+        Args:
+            repo_slug: Repository slug
+            workspace: Workspace name (defaults to self.workspace)
+            page_size: Items per page (default: 20)
+            max_pages: Maximum pages to fetch (default: 1)
+
+        Returns:
+            Paginated list of pipeline variables
+        """
+        ws = workspace or self.workspace
+        config = PaginationConfig(page_size=page_size, max_pages=max_pages)
+        return await aggregate_pages(
+            self.client,
+            f"/repositories/{ws}/{repo_slug}/pipelines_config/variables",
+            {},
+            config,
+        )
+
+    async def get_pipeline_variable(
+        self,
+        repo_slug: str,
+        variable_uuid: str,
+        workspace: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Get a single repository-level pipeline variable.
+
+        Args:
+            repo_slug: Repository slug
+            variable_uuid: Variable UUID
+            workspace: Workspace name (defaults to self.workspace)
+
+        Returns:
+            Pipeline variable (no value if secured)
+        """
+        ws = workspace or self.workspace
+        response = await self.client.get(
+            f"/repositories/{ws}/{repo_slug}/pipelines_config/variables/{variable_uuid}"
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def create_pipeline_variable(
+        self,
+        repo_slug: str,
+        key: str,
+        value: str,
+        secured: bool = False,
+        workspace: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Create a repository-level pipeline variable.
+
+        Args:
+            repo_slug: Repository slug
+            key: Variable name
+            value: Variable value
+            secured: Whether the value is secured/masked (default: False)
+            workspace: Workspace name (defaults to self.workspace)
+
+        Returns:
+            Created variable
+        """
+        ws = workspace or self.workspace
+        payload = {"key": key, "value": value, "secured": secured}
+        response = await self.client.post(
+            f"/repositories/{ws}/{repo_slug}/pipelines_config/variables",
+            json=payload,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def update_pipeline_variable(
+        self,
+        repo_slug: str,
+        variable_uuid: str,
+        key: Optional[str] = None,
+        value: Optional[str] = None,
+        secured: Optional[bool] = None,
+        workspace: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Update a repository-level pipeline variable (partial update).
+
+        Args:
+            repo_slug: Repository slug
+            variable_uuid: Variable UUID
+            key: New variable name (optional)
+            value: New variable value (optional)
+            secured: New secured flag (optional)
+            workspace: Workspace name (defaults to self.workspace)
+
+        Returns:
+            Updated variable
+        """
+        ws = workspace or self.workspace
+        payload: Dict[str, Any] = {}
+        if key is not None:
+            payload["key"] = key
+        if value is not None:
+            payload["value"] = value
+        if secured is not None:
+            payload["secured"] = secured
+        if not payload:
+            raise ValueError(
+                "update_pipeline_variable requires at least one of key/value/secured."
+            )
+        response = await self.client.put(
+            f"/repositories/{ws}/{repo_slug}/pipelines_config/variables/{variable_uuid}",
+            json=payload,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def delete_pipeline_variable(
+        self,
+        repo_slug: str,
+        variable_uuid: str,
+        workspace: Optional[str] = None,
+    ) -> None:
+        """
+        Delete a repository-level pipeline variable.
+
+        Args:
+            repo_slug: Repository slug
+            variable_uuid: Variable UUID
+            workspace: Workspace name (defaults to self.workspace)
+        """
+        ws = workspace or self.workspace
+        response = await self.client.delete(
+            f"/repositories/{ws}/{repo_slug}/pipelines_config/variables/{variable_uuid}"
+        )
+        response.raise_for_status()
+
+    async def list_pipeline_schedules(
+        self,
+        repo_slug: str,
+        workspace: Optional[str] = None,
+        page_size: int = 20,
+        max_pages: Optional[int] = 1,
+    ) -> Dict[str, Any]:
+        """
+        List pipeline schedules with pagination support.
+
+        Args:
+            repo_slug: Repository slug
+            workspace: Workspace name (defaults to self.workspace)
+            page_size: Items per page (default: 20)
+            max_pages: Maximum pages to fetch (default: 1)
+
+        Returns:
+            Paginated list of pipeline schedules
+        """
+        ws = workspace or self.workspace
+        config = PaginationConfig(page_size=page_size, max_pages=max_pages)
+        return await aggregate_pages(
+            self.client,
+            f"/repositories/{ws}/{repo_slug}/pipelines_config/schedules",
+            {},
+            config,
+        )
+
+    async def get_pipeline_schedule(
+        self,
+        repo_slug: str,
+        schedule_uuid: str,
+        workspace: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Get a single pipeline schedule.
+
+        Args:
+            repo_slug: Repository slug
+            schedule_uuid: Schedule UUID
+            workspace: Workspace name (defaults to self.workspace)
+
+        Returns:
+            Pipeline schedule
+        """
+        ws = workspace or self.workspace
+        response = await self.client.get(
+            f"/repositories/{ws}/{repo_slug}/pipelines_config/schedules/{schedule_uuid}"
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def list_pipeline_schedule_executions(
+        self,
+        repo_slug: str,
+        schedule_uuid: str,
+        workspace: Optional[str] = None,
+        page_size: int = 20,
+        max_pages: Optional[int] = 1,
+    ) -> Dict[str, Any]:
+        """
+        List the executions of a pipeline schedule with pagination support.
+
+        Args:
+            repo_slug: Repository slug
+            schedule_uuid: Schedule UUID
+            workspace: Workspace name (defaults to self.workspace)
+            page_size: Items per page (default: 20)
+            max_pages: Maximum pages to fetch (default: 1)
+
+        Returns:
+            Paginated list of schedule executions
+        """
+        ws = workspace or self.workspace
+        config = PaginationConfig(page_size=page_size, max_pages=max_pages)
+        return await aggregate_pages(
+            self.client,
+            f"/repositories/{ws}/{repo_slug}/pipelines_config/schedules/{schedule_uuid}/executions",
+            {},
+            config,
+        )
+
+    async def create_pipeline_schedule(
+        self,
+        repo_slug: str,
+        branch: str,
+        cron_pattern: str,
+        workspace: Optional[str] = None,
+        enabled: bool = True,
+        selector_pattern: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Create a pipeline schedule on a branch.
+
+        Args:
+            repo_slug: Repository slug
+            branch: Branch the scheduled pipeline runs on
+            cron_pattern: Cron expression (Bitbucket 7-field format, e.g. "0 0 6 * * ? *")
+            workspace: Workspace name (defaults to self.workspace)
+            enabled: Whether the schedule is enabled (default: True)
+            selector_pattern: Pipeline selector pattern (defaults to the branch name)
+
+        Returns:
+            Created schedule
+        """
+        ws = workspace or self.workspace
+        payload = {
+            "type": "pipeline_schedule",
+            "enabled": enabled,
+            "target": {
+                "type": "pipeline_ref_target",
+                "ref_type": "branch",
+                "ref_name": branch,
+                "selector": {
+                    "type": "branches",
+                    "pattern": selector_pattern if selector_pattern is not None else branch,
+                },
+            },
+            "cron_pattern": cron_pattern,
+        }
+        response = await self.client.post(
+            f"/repositories/{ws}/{repo_slug}/pipelines_config/schedules",
+            json=payload,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def update_pipeline_schedule(
+        self,
+        repo_slug: str,
+        schedule_uuid: str,
+        enabled: Optional[bool] = None,
+        cron_pattern: Optional[str] = None,
+        workspace: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Update a pipeline schedule (partial update).
+
+        Args:
+            repo_slug: Repository slug
+            schedule_uuid: Schedule UUID
+            enabled: New enabled flag (optional)
+            cron_pattern: New cron expression (optional)
+            workspace: Workspace name (defaults to self.workspace)
+
+        Returns:
+            Updated schedule
+        """
+        ws = workspace or self.workspace
+        payload: Dict[str, Any] = {}
+        if enabled is not None:
+            payload["enabled"] = enabled
+        if cron_pattern is not None:
+            payload["cron_pattern"] = cron_pattern
+        if not payload:
+            raise ValueError(
+                "update_pipeline_schedule requires at least one of enabled/cron_pattern."
+            )
+        response = await self.client.put(
+            f"/repositories/{ws}/{repo_slug}/pipelines_config/schedules/{schedule_uuid}",
+            json=payload,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def delete_pipeline_schedule(
+        self,
+        repo_slug: str,
+        schedule_uuid: str,
+        workspace: Optional[str] = None,
+    ) -> None:
+        """
+        Delete a pipeline schedule.
+
+        Args:
+            repo_slug: Repository slug
+            schedule_uuid: Schedule UUID
+            workspace: Workspace name (defaults to self.workspace)
+        """
+        ws = workspace or self.workspace
+        response = await self.client.delete(
+            f"/repositories/{ws}/{repo_slug}/pipelines_config/schedules/{schedule_uuid}"
+        )
+        response.raise_for_status()
+
+    async def list_pipeline_caches(
+        self,
+        repo_slug: str,
+        workspace: Optional[str] = None,
+        page_size: int = 20,
+        max_pages: Optional[int] = 1,
+    ) -> Dict[str, Any]:
+        """
+        List pipeline caches with pagination support.
+
+        Uses the ``pipelines-config`` (hyphen) path — see the section note.
+
+        Args:
+            repo_slug: Repository slug
+            workspace: Workspace name (defaults to self.workspace)
+            page_size: Items per page (default: 20)
+            max_pages: Maximum pages to fetch (default: 1)
+
+        Returns:
+            Paginated list of pipeline caches
+        """
+        ws = workspace or self.workspace
+        config = PaginationConfig(page_size=page_size, max_pages=max_pages)
+        return await aggregate_pages(
+            self.client,
+            f"/repositories/{ws}/{repo_slug}/pipelines-config/caches",
+            {},
+            config,
+        )
+
+    async def delete_pipeline_cache(
+        self,
+        repo_slug: str,
+        cache_uuid: str,
+        workspace: Optional[str] = None,
+    ) -> None:
+        """
+        Delete a pipeline cache.
+
+        Uses the ``pipelines-config`` (hyphen) path — see the section note.
+
+        Args:
+            repo_slug: Repository slug
+            cache_uuid: Cache UUID
+            workspace: Workspace name (defaults to self.workspace)
+        """
+        ws = workspace or self.workspace
+        response = await self.client.delete(
+            f"/repositories/{ws}/{repo_slug}/pipelines-config/caches/{cache_uuid}"
+        )
+        response.raise_for_status()
+
     # ========== Default Reviewers ==========
 
     async def get_effective_default_reviewers(

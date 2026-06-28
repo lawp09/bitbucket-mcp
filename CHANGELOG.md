@@ -1,5 +1,24 @@
 # Changelog - Bitbucket MCP Server Python
 
+## [1.19.0] - 2026-06-27
+
+### Added
+- Pipelines Config tools — 14 new MCP tools. Read (enabled): `get_pipeline_config`, `list_pipeline_variables`, `get_pipeline_variable`, `list_pipeline_schedules`, `get_pipeline_schedule`, `list_pipeline_schedule_executions`, `list_pipeline_caches`. Write (disabled by default): `create_pipeline_variable`, `update_pipeline_variable`, `delete_pipeline_variable`, `create_pipeline_schedule`, `update_pipeline_schedule`, `delete_pipeline_schedule`, `delete_pipeline_cache`.
+- Slim responses `slim_pipeline_config`, `slim_pipeline_variable` (secured variables never expose their value), `slim_pipeline_schedule`, `slim_pipeline_schedule_execution`, `slim_pipeline_cache`.
+
+### Changed
+- `list_directory` hoists the resolved commit hash to a single top-level `commit` field instead of repeating it on every entry (token saving on large directories — all entries of a listing are at the same commit).
+
+### Fixed
+- `slim_pipeline_run` / `slim_pipeline_step` no longer raise `AttributeError` when `state` or `state.result` is null (the case for in-progress runs).
+
+### Notes (verified against the live API)
+- Pipeline caches live under the `pipelines-config` (hyphen) path, while variables and schedules use `pipelines_config` (underscore).
+- `get_pipeline_config` requires the `admin:repository` scope; a read-only token receives a 403 listing the missing privilege.
+- Pipeline list endpoints return an empty `200` (not a `404`) when there are no items, so no special "pipelines disabled" handling is needed.
+
+---
+
 ## [1.18.0] - 2026-06-27
 
 ### Added

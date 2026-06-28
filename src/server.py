@@ -23,6 +23,11 @@ from .utils.transformers import (
     slim_activity_list,
     slim_pipeline_run, slim_pipeline_run_list,
     slim_pipeline_step_list,
+    slim_pipeline_config,
+    slim_pipeline_variable, slim_pipeline_variable_list,
+    slim_pipeline_schedule, slim_pipeline_schedule_list,
+    slim_pipeline_schedule_execution_list,
+    slim_pipeline_cache_list,
     slim_reviewer_list,
     slim_task, slim_task_list,
     slim_issue, slim_issue_list,
@@ -2250,3 +2255,354 @@ async def list_directory(
         repo_slug, commit, path, workspace, page_size, max_pages
     )
     return slim_source_list(result)
+
+
+# ========== Pipelines Config Tools ==========
+
+@conditional_tool()
+async def get_pipeline_config(
+    repo_slug: str,
+    workspace: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Get the repository pipelines configuration (enabled flag, next build number).
+
+    Note: this endpoint requires the `admin:repository` scope. A read-only token
+    receives a 403 listing the missing privilege.
+
+    Args:
+        repo_slug: Repository slug
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Pipelines configuration (enabled, next_build_number)
+    """
+    client = get_client()
+    result = await client.get_pipeline_config(repo_slug, workspace)
+    return slim_pipeline_config(result)
+
+
+@conditional_tool()
+async def list_pipeline_variables(
+    repo_slug: str,
+    workspace: Optional[str] = None,
+    page_size: int = 20,
+    max_pages: Optional[int] = 1
+) -> Dict[str, Any]:
+    """
+    List repository-level pipeline variables.
+
+    Secured variables never expose their value (returned as null).
+
+    Args:
+        repo_slug: Repository slug
+        workspace: Workspace name (optional, defaults to configured workspace)
+        page_size: Items per page (default: 20)
+        max_pages: Maximum pages to fetch (default: 1, max recommended: 10)
+
+    Returns:
+        Paginated list of pipeline variables
+    """
+    client = get_client()
+    result = await client.list_pipeline_variables(repo_slug, workspace, page_size, max_pages)
+    return slim_pipeline_variable_list(result)
+
+
+@conditional_tool()
+async def get_pipeline_variable(
+    repo_slug: str,
+    variable_uuid: str,
+    workspace: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Get a single repository-level pipeline variable.
+
+    Args:
+        repo_slug: Repository slug
+        variable_uuid: Variable UUID
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Pipeline variable (value is null if secured)
+    """
+    client = get_client()
+    result = await client.get_pipeline_variable(repo_slug, variable_uuid, workspace)
+    return slim_pipeline_variable(result)
+
+
+@conditional_tool()
+async def create_pipeline_variable(
+    repo_slug: str,
+    key: str,
+    value: str,
+    secured: bool = False,
+    workspace: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Create a repository-level pipeline variable.
+
+    Args:
+        repo_slug: Repository slug
+        key: Variable name
+        value: Variable value
+        secured: Whether the value is secured/masked (default: False)
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Created variable (value is null if secured)
+    """
+    client = get_client()
+    result = await client.create_pipeline_variable(repo_slug, key, value, secured, workspace)
+    return slim_pipeline_variable(result)
+
+
+@conditional_tool()
+async def update_pipeline_variable(
+    repo_slug: str,
+    variable_uuid: str,
+    key: Optional[str] = None,
+    value: Optional[str] = None,
+    secured: Optional[bool] = None,
+    workspace: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Update a repository-level pipeline variable (partial update).
+
+    Args:
+        repo_slug: Repository slug
+        variable_uuid: Variable UUID
+        key: New variable name (optional)
+        value: New variable value (optional)
+        secured: New secured flag (optional)
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Updated variable (value is null if secured)
+    """
+    client = get_client()
+    result = await client.update_pipeline_variable(
+        repo_slug, variable_uuid, key, value, secured, workspace
+    )
+    return slim_pipeline_variable(result)
+
+
+@conditional_tool()
+async def delete_pipeline_variable(
+    repo_slug: str,
+    variable_uuid: str,
+    workspace: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Delete a repository-level pipeline variable.
+
+    Args:
+        repo_slug: Repository slug
+        variable_uuid: Variable UUID
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Confirmation {"deleted": True, "variable_uuid": ...}
+    """
+    client = get_client()
+    await client.delete_pipeline_variable(repo_slug, variable_uuid, workspace)
+    return {"deleted": True, "variable_uuid": variable_uuid}
+
+
+@conditional_tool()
+async def list_pipeline_schedules(
+    repo_slug: str,
+    workspace: Optional[str] = None,
+    page_size: int = 20,
+    max_pages: Optional[int] = 1
+) -> Dict[str, Any]:
+    """
+    List pipeline schedules for a repository.
+
+    Args:
+        repo_slug: Repository slug
+        workspace: Workspace name (optional, defaults to configured workspace)
+        page_size: Items per page (default: 20)
+        max_pages: Maximum pages to fetch (default: 1, max recommended: 10)
+
+    Returns:
+        Paginated list of pipeline schedules
+    """
+    client = get_client()
+    result = await client.list_pipeline_schedules(repo_slug, workspace, page_size, max_pages)
+    return slim_pipeline_schedule_list(result)
+
+
+@conditional_tool()
+async def get_pipeline_schedule(
+    repo_slug: str,
+    schedule_uuid: str,
+    workspace: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Get a single pipeline schedule.
+
+    Args:
+        repo_slug: Repository slug
+        schedule_uuid: Schedule UUID
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Pipeline schedule
+    """
+    client = get_client()
+    result = await client.get_pipeline_schedule(repo_slug, schedule_uuid, workspace)
+    return slim_pipeline_schedule(result)
+
+
+@conditional_tool()
+async def list_pipeline_schedule_executions(
+    repo_slug: str,
+    schedule_uuid: str,
+    workspace: Optional[str] = None,
+    page_size: int = 20,
+    max_pages: Optional[int] = 1
+) -> Dict[str, Any]:
+    """
+    List the executions of a pipeline schedule.
+
+    Args:
+        repo_slug: Repository slug
+        schedule_uuid: Schedule UUID
+        workspace: Workspace name (optional, defaults to configured workspace)
+        page_size: Items per page (default: 20)
+        max_pages: Maximum pages to fetch (default: 1, max recommended: 10)
+
+    Returns:
+        Paginated list of schedule executions
+    """
+    client = get_client()
+    result = await client.list_pipeline_schedule_executions(
+        repo_slug, schedule_uuid, workspace, page_size, max_pages
+    )
+    return slim_pipeline_schedule_execution_list(result)
+
+
+@conditional_tool()
+async def create_pipeline_schedule(
+    repo_slug: str,
+    branch: str,
+    cron_pattern: str,
+    workspace: Optional[str] = None,
+    enabled: bool = True,
+    selector_pattern: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Create a pipeline schedule on a branch.
+
+    Args:
+        repo_slug: Repository slug
+        branch: Branch the scheduled pipeline runs on
+        cron_pattern: Cron expression (Bitbucket 7-field format, e.g. "0 0 6 * * ? *")
+        workspace: Workspace name (optional, defaults to configured workspace)
+        enabled: Whether the schedule is enabled (default: True)
+        selector_pattern: Pipeline selector pattern (defaults to the branch name)
+
+    Returns:
+        Created schedule
+    """
+    client = get_client()
+    result = await client.create_pipeline_schedule(
+        repo_slug, branch, cron_pattern, workspace, enabled, selector_pattern
+    )
+    return slim_pipeline_schedule(result)
+
+
+@conditional_tool()
+async def update_pipeline_schedule(
+    repo_slug: str,
+    schedule_uuid: str,
+    enabled: Optional[bool] = None,
+    cron_pattern: Optional[str] = None,
+    workspace: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Update a pipeline schedule (partial update).
+
+    Args:
+        repo_slug: Repository slug
+        schedule_uuid: Schedule UUID
+        enabled: New enabled flag (optional)
+        cron_pattern: New cron expression (optional)
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Updated schedule
+    """
+    client = get_client()
+    result = await client.update_pipeline_schedule(
+        repo_slug, schedule_uuid, enabled, cron_pattern, workspace
+    )
+    return slim_pipeline_schedule(result)
+
+
+@conditional_tool()
+async def delete_pipeline_schedule(
+    repo_slug: str,
+    schedule_uuid: str,
+    workspace: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Delete a pipeline schedule.
+
+    Args:
+        repo_slug: Repository slug
+        schedule_uuid: Schedule UUID
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Confirmation {"deleted": True, "schedule_uuid": ...}
+    """
+    client = get_client()
+    await client.delete_pipeline_schedule(repo_slug, schedule_uuid, workspace)
+    return {"deleted": True, "schedule_uuid": schedule_uuid}
+
+
+@conditional_tool()
+async def list_pipeline_caches(
+    repo_slug: str,
+    workspace: Optional[str] = None,
+    page_size: int = 20,
+    max_pages: Optional[int] = 1
+) -> Dict[str, Any]:
+    """
+    List pipeline caches for a repository.
+
+    Args:
+        repo_slug: Repository slug
+        workspace: Workspace name (optional, defaults to configured workspace)
+        page_size: Items per page (default: 20)
+        max_pages: Maximum pages to fetch (default: 1, max recommended: 10)
+
+    Returns:
+        Paginated list of pipeline caches
+    """
+    client = get_client()
+    result = await client.list_pipeline_caches(repo_slug, workspace, page_size, max_pages)
+    return slim_pipeline_cache_list(result)
+
+
+@conditional_tool()
+async def delete_pipeline_cache(
+    repo_slug: str,
+    cache_uuid: str,
+    workspace: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Delete a pipeline cache.
+
+    Args:
+        repo_slug: Repository slug
+        cache_uuid: Cache UUID
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Confirmation {"deleted": True, "cache_uuid": ...}
+    """
+    client = get_client()
+    await client.delete_pipeline_cache(repo_slug, cache_uuid, workspace)
+    return {"deleted": True, "cache_uuid": cache_uuid}

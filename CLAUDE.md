@@ -4,7 +4,7 @@
 
 **Name**: bitbucket-mcp-py
 **Type**: MCP (Model Context Protocol) Server for Bitbucket API
-**Version**: 1.18.0
+**Version**: 1.19.0
 **Python**: 3.12+
 **Container Runtime**: Podman (preferred) or Docker
 
@@ -116,7 +116,7 @@ security add-generic-password -s "bitbucket-mcp" -a "bitbucket_workspace" -w "wo
 - **Method**: Basic Auth (`Authorization: Basic base64(email:token)`)
 - **API Base**: `https://api.bitbucket.org/2.0`
 
-### MCP Tools (63 total)
+### MCP Tools (77 total)
 
 | Category | Tools |
 |----------|-------|
@@ -128,6 +128,7 @@ security add-generic-password -s "bitbucket-mcp" -a "bitbucket_workspace" -w "wo
 | **PR Discovery** | `get_pull_requests_pending_review` |
 | **Build / CI** | `get_pull_request_statuses`, `get_commit_statuses` |
 | **Pipelines** | `list_pipeline_runs`, `get_pipeline_run`, `get_pipeline_steps`, `get_pipeline_step_logs`, `run_pipeline`, `stop_pipeline` |
+| **Pipelines Config** | `get_pipeline_config`, `list_pipeline_variables`, `get_pipeline_variable`, `create_pipeline_variable`, `update_pipeline_variable`, `delete_pipeline_variable`, `list_pipeline_schedules`, `get_pipeline_schedule`, `list_pipeline_schedule_executions`, `create_pipeline_schedule`, `update_pipeline_schedule`, `delete_pipeline_schedule`, `list_pipeline_caches`, `delete_pipeline_cache` |
 | **Reviewers** | `get_effective_default_reviewers`, `suggest_pull_request_reviewers` |
 | **Draft PR** | `create_draft_pull_request`, `publish_draft_pull_request`, `convert_pull_request_to_draft` |
 | **Batch Review** | `submit_pull_request_batch_review` |
@@ -136,7 +137,7 @@ security add-generic-password -s "bitbucket-mcp" -a "bitbucket_workspace" -w "wo
 | **Commits** | `list_commits`, `get_commit`, `get_commit_comments`, `get_commit_comment`, `add_commit_comment` |
 | **Source** | `get_file_content`, `list_directory` |
 
-**Disabled by default**: `merge_pull_request` (safety), `stop_pipeline` (safety), `get_pull_request_patch` (git am format — use `get_pull_request_diff` for AI review), `convert_pull_request_to_draft` (not supported by Bitbucket API), `delete_issue` (safety), `delete_issue_comment` (safety), `add_commit_comment` (write op)
+**Disabled by default**: `merge_pull_request` (safety), `stop_pipeline` (safety), `get_pull_request_patch` (git am format — use `get_pull_request_diff` for AI review), `convert_pull_request_to_draft` (not supported by Bitbucket API), `delete_issue` (safety), `delete_issue_comment` (safety), `add_commit_comment` (write op), `create_pipeline_variable`/`update_pipeline_variable`/`delete_pipeline_variable` (write ops), `create_pipeline_schedule`/`update_pipeline_schedule`/`delete_pipeline_schedule` (write ops), `delete_pipeline_cache` (safety)
 
 > **Token tip** — `get_pull_request_diff` accepts an optional `path` parameter to filter the diff to a single file, reducing token usage by ~95% on large PRs:
 > ```python
@@ -281,6 +282,7 @@ Then: `git tag vX.Y.Z && git push origin vX.Y.Z` → GitHub Actions handles the 
 
 ## Recent Changes
 
+- Added Pipelines Config tools — 14 tools (`get_pipeline_config`, `list_pipeline_variables`, `get_pipeline_variable`, `list_pipeline_schedules`, `get_pipeline_schedule`, `list_pipeline_schedule_executions`, `list_pipeline_caches` enabled; `create/update/delete_pipeline_variable`, `create/update/delete_pipeline_schedule`, `delete_pipeline_cache` disabled). Slim responses `slim_pipeline_config`/`slim_pipeline_variable` (masks secured values)/`slim_pipeline_schedule`/`slim_pipeline_cache`. **API gotchas verified live**: caches use the `pipelines-config` (hyphen) path while variables/schedules use `pipelines_config` (underscore); `get_pipeline_config` requires the `admin:repository` scope (403 otherwise); pipeline list endpoints return 200-empty (not 404) when there are no items, so no `pipelines_disabled` wrapper is needed. Hardened `slim_pipeline_run`/`step` against null `state`/`result` (in-progress runs) (v1.19.0)
 - Added Source & Commits tools — 7 tools (`list_commits`, `get_commit`, `get_commit_comments`, `get_commit_comment`, `add_commit_comment` [disabled], `get_file_content`, `list_directory`); read a file/tree at any commit without cloning, browse commit history. `/src` access is hardened: percent-encoded paths, `..` traversal rejected, `?format=meta` pre-check rejecting directories/oversized/binary files, TOCTOU-safe pinning to the resolved commit hash, tolerant decoding. New transformers `slim_commit_comment`/`slim_source_entry`; `aggregate_pages` gains `follow_redirects` (the `/src` endpoint 302-redirects) (v1.18.0)
 - Added Bitbucket Issue Tracker support — 10 tools (`list_issues`, `get_issue`, `create_issue`, `update_issue`, `delete_issue` [disabled], `get_issue_comments`, `get_issue_comment`, `add_issue_comment`, `update_issue_comment`, `delete_issue_comment` [disabled]); `list_issues` filters via dedicated params + raw BBQL `q` + `sort`; graceful `issue_tracker_disabled` response when the opt-in tracker is off; slim responses `slim_issue`/`slim_issue_comment` (v1.17.0, #50)
 - Documented OpenAI Codex as MCP client (CLI + `~/.codex/config.toml`); client priority Claude Code → Codex → Cursor → VS Code (GitHub Copilot); added `openai-codex` PyPI keyword (v1.16.1)
