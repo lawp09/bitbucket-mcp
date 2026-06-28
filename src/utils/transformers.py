@@ -209,21 +209,34 @@ def slim_source_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
     """Slim a single source tree entry (file or directory).
 
     Bitbucket tags each entry with ``type`` = ``commit_file`` or
-    ``commit_directory``. ``size``/``mimetype`` are only present on files.
+    ``commit_directory``. ``size``/``mimetype`` are only present on files. The
+    per-entry commit is intentionally omitted: every entry of one listing shares
+    the same commit, which ``slim_source_list`` hoists to a single top-level field.
     """
-    commit = entry.get("commit") or {}
     return {
         "path": entry.get("path"),
         "type": entry.get("type"),
         "size": entry.get("size"),
         "mimetype": entry.get("mimetype"),
-        "commit": commit.get("hash", "")[:12] if commit.get("hash") else None,
     }
 
 
 def slim_source_list(data: Dict[str, Any]) -> Dict[str, Any]:
-    """Slim a paginated directory listing from the ``/src`` endpoint."""
-    return _slim_paginated(data, slim_source_entry)
+    """Slim a paginated directory listing from the ``/src`` endpoint.
+
+    The resolved commit hash is hoisted to a single top-level ``commit`` field
+    instead of being repeated on every entry (saves tokens on large directories,
+    since all entries of a listing are at the same commit).
+    """
+    result = _slim_paginated(data, slim_source_entry)
+    commit_hash = None
+    for entry in data.get("values", []):
+        commit = entry.get("commit") or {}
+        if commit.get("hash"):
+            commit_hash = commit["hash"][:12]
+            break
+    result["commit"] = commit_hash
+    return result
 
 
 # ========== Diffstat ==========
