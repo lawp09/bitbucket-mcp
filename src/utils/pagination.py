@@ -1,7 +1,7 @@
 """Pagination utilities for Bitbucket API responses"""
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
 import httpx
@@ -40,6 +40,7 @@ async def paginate_bitbucket(
     url: str,
     params: Dict[str, Any],
     config: Optional[PaginationConfig] = None,
+    follow_redirects: bool = False,
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """
     Paginate through Bitbucket API responses following 'next' links.
@@ -49,6 +50,9 @@ async def paginate_bitbucket(
         url: Initial URL to fetch
         params: Query parameters for the request
         config: Pagination configuration (uses defaults if not provided)
+        follow_redirects: Follow HTTP redirects (needed for the ``/src`` endpoint,
+            which 302-redirects to a commit-pinned URL). Defaults to False to keep
+            the existing behaviour of every other paginated endpoint unchanged.
 
     Yields:
         Dictionary containing page data with 'values' and metadata
@@ -64,7 +68,11 @@ async def paginate_bitbucket(
     items_fetched = 0
 
     while current_url and (config.max_pages is None or pages_fetched < config.max_pages):
-        response = await client.get(current_url, params=params if pages_fetched == 0 else None)
+        response = await client.get(
+            current_url,
+            params=params if pages_fetched == 0 else None,
+            follow_redirects=follow_redirects,
+        )
         response.raise_for_status()
 
         data = response.json()
@@ -141,6 +149,7 @@ async def aggregate_pages(
     url: str,
     params: Dict[str, Any],
     config: PaginationConfig,
+    follow_redirects: bool = False,
 ) -> Dict[str, Any]:
     """
     Fetch and aggregate paginated responses from Bitbucket API.
@@ -150,6 +159,8 @@ async def aggregate_pages(
         url: API endpoint URL (can be absolute or relative to base_url)
         params: Query parameters for the request
         config: Pagination configuration
+        follow_redirects: Follow HTTP redirects (needed for the ``/src`` directory
+            listing). Defaults to False to preserve existing endpoint behaviour.
 
     Returns:
         Dictionary with aggregated values and metadata from all fetched pages
@@ -159,7 +170,9 @@ async def aggregate_pages(
 
     # Collect all pages
     pages = []
-    async for page in paginate_bitbucket(client, url, params_with_pagination, config):
+    async for page in paginate_bitbucket(
+        client, url, params_with_pagination, config, follow_redirects=follow_redirects
+    ):
         pages.append(page)
 
     # Aggregate using the sync helper

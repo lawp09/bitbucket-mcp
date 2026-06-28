@@ -4,7 +4,7 @@ Each function takes a raw Bitbucket API response and returns a slimmed version
 containing only the fields useful for LLM tool consumption.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 
 def _slim_user(user: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -203,6 +203,29 @@ def slim_commit_list(data: Dict[str, Any]) -> Dict[str, Any]:
     return _slim_paginated(data, slim_commit)
 
 
+# ========== Source (file/directory browsing) ==========
+
+def slim_source_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
+    """Slim a single source tree entry (file or directory).
+
+    Bitbucket tags each entry with ``type`` = ``commit_file`` or
+    ``commit_directory``. ``size``/``mimetype`` are only present on files.
+    """
+    commit = entry.get("commit") or {}
+    return {
+        "path": entry.get("path"),
+        "type": entry.get("type"),
+        "size": entry.get("size"),
+        "mimetype": entry.get("mimetype"),
+        "commit": commit.get("hash", "")[:12] if commit.get("hash") else None,
+    }
+
+
+def slim_source_list(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Slim a paginated directory listing from the ``/src`` endpoint."""
+    return _slim_paginated(data, slim_source_entry)
+
+
 # ========== Diffstat ==========
 
 def slim_diffstat_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
@@ -259,6 +282,43 @@ def slim_comment(comment: Dict[str, Any]) -> Dict[str, Any]:
 def slim_comment_list(data: Dict[str, Any]) -> Dict[str, Any]:
     """Slim a paginated list of comments."""
     return _slim_paginated(data, slim_comment)
+
+
+def slim_commit_comment(comment: Dict[str, Any]) -> Dict[str, Any]:
+    """Slim a single commit comment.
+
+    Distinct from ``slim_comment`` (PR comments): commit comments have no
+    resolution lifecycle, so the ``is_resolved``/``resolved_*``/``pending``
+    fields are deliberately omitted to avoid emitting confusing null noise.
+    """
+    content = comment.get("content", {})
+    inline = comment.get("inline")
+    parent = comment.get("parent")
+
+    result = {
+        "id": comment.get("id"),
+        "content": content.get("raw"),
+        "author": _slim_user(comment.get("user")),
+        "created_on": comment.get("created_on"),
+        "updated_on": comment.get("updated_on"),
+    }
+
+    if inline:
+        result["inline"] = {
+            "path": inline.get("path"),
+            "from": inline.get("from"),
+            "to": inline.get("to"),
+        }
+
+    if parent:
+        result["parent_id"] = parent.get("id")
+
+    return result
+
+
+def slim_commit_comment_list(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Slim a paginated list of commit comments."""
+    return _slim_paginated(data, slim_commit_comment)
 
 
 # ========== Tasks ==========

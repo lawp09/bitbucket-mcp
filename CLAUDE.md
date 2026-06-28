@@ -4,7 +4,7 @@
 
 **Name**: bitbucket-mcp-py
 **Type**: MCP (Model Context Protocol) Server for Bitbucket API
-**Version**: 1.16.1
+**Version**: 1.18.0
 **Python**: 3.12+
 **Container Runtime**: Podman (preferred) or Docker
 
@@ -116,7 +116,7 @@ security add-generic-password -s "bitbucket-mcp" -a "bitbucket_workspace" -w "wo
 - **Method**: Basic Auth (`Authorization: Basic base64(email:token)`)
 - **API Base**: `https://api.bitbucket.org/2.0`
 
-### MCP Tools (56 total)
+### MCP Tools (63 total)
 
 | Category | Tools |
 |----------|-------|
@@ -133,8 +133,10 @@ security add-generic-password -s "bitbucket-mcp" -a "bitbucket_workspace" -w "wo
 | **Batch Review** | `submit_pull_request_batch_review` |
 | **Review Summary** | `get_pull_request_review_summary` |
 | **Issues** | `list_issues`, `get_issue`, `create_issue`, `update_issue`, `delete_issue`, `get_issue_comments`, `get_issue_comment`, `add_issue_comment`, `update_issue_comment`, `delete_issue_comment` |
+| **Commits** | `list_commits`, `get_commit`, `get_commit_comments`, `get_commit_comment`, `add_commit_comment` |
+| **Source** | `get_file_content`, `list_directory` |
 
-**Disabled by default**: `merge_pull_request` (safety), `stop_pipeline` (safety), `get_pull_request_patch` (git am format — use `get_pull_request_diff` for AI review), `convert_pull_request_to_draft` (not supported by Bitbucket API), `delete_issue` (safety), `delete_issue_comment` (safety)
+**Disabled by default**: `merge_pull_request` (safety), `stop_pipeline` (safety), `get_pull_request_patch` (git am format — use `get_pull_request_diff` for AI review), `convert_pull_request_to_draft` (not supported by Bitbucket API), `delete_issue` (safety), `delete_issue_comment` (safety), `add_commit_comment` (write op)
 
 > **Token tip** — `get_pull_request_diff` accepts an optional `path` parameter to filter the diff to a single file, reducing token usage by ~95% on large PRs:
 > ```python
@@ -279,6 +281,7 @@ Then: `git tag vX.Y.Z && git push origin vX.Y.Z` → GitHub Actions handles the 
 
 ## Recent Changes
 
+- Added Source & Commits tools — 7 tools (`list_commits`, `get_commit`, `get_commit_comments`, `get_commit_comment`, `add_commit_comment` [disabled], `get_file_content`, `list_directory`); read a file/tree at any commit without cloning, browse commit history. `/src` access is hardened: percent-encoded paths, `..` traversal rejected, `?format=meta` pre-check rejecting directories/oversized/binary files, TOCTOU-safe pinning to the resolved commit hash, tolerant decoding. New transformers `slim_commit_comment`/`slim_source_entry`; `aggregate_pages` gains `follow_redirects` (the `/src` endpoint 302-redirects) (v1.18.0)
 - Added Bitbucket Issue Tracker support — 10 tools (`list_issues`, `get_issue`, `create_issue`, `update_issue`, `delete_issue` [disabled], `get_issue_comments`, `get_issue_comment`, `add_issue_comment`, `update_issue_comment`, `delete_issue_comment` [disabled]); `list_issues` filters via dedicated params + raw BBQL `q` + `sort`; graceful `issue_tracker_disabled` response when the opt-in tracker is off; slim responses `slim_issue`/`slim_issue_comment` (v1.17.0, #50)
 - Documented OpenAI Codex as MCP client (CLI + `~/.codex/config.toml`); client priority Claude Code → Codex → Cursor → VS Code (GitHub Copilot); added `openai-codex` PyPI keyword (v1.16.1)
 - Added `get_repository_tags` tool — list repository tags sorted by most recent target (commit) date, slim responses (`slim_tag`/`slim_tag_list`) + pagination; pagination aligned with `list_repositories` (v1.16.0, #49)

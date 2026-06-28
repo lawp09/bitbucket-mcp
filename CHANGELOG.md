@@ -1,5 +1,19 @@
 # Changelog - Bitbucket MCP Server Python
 
+## [1.18.0] - 2026-06-27
+
+### Added
+- Source & Commits tools — 7 new MCP tools: `list_commits` (optionally scoped to a revision/path), `get_commit`, `get_commit_comments`, `get_commit_comment`, `add_commit_comment` (disabled by default — write op), `get_file_content`, `list_directory`. An agent can now read a file or browse the tree at any commit/branch and inspect commit history without cloning.
+- Slim responses `slim_commit_comment` / `slim_source_entry` (the commit-comment slim deliberately drops the resolution fields that only apply to PR comments).
+
+### Changed
+- `aggregate_pages` / `paginate_bitbucket` gain an opt-in `follow_redirects` flag (default `False`, no change to existing endpoints) — required because the `/src` directory listing 302-redirects to a commit-pinned URL.
+
+### Security
+- `get_file_content` / `list_directory` harden `/src` access: the user `path` is percent-encoded (`?`, `#`, `%`, spaces), parent-directory (`..`) segments are rejected, a `?format=meta` pre-check refuses directories / oversized files (> 256 KiB) / binary mimetypes, the content fetch is pinned to the resolved commit hash (closes a TOCTOU window on moving branch refs), and decoding is tolerant (`errors="replace"`) to avoid crashes on non-UTF-8 files.
+
+---
+
 ## [1.17.0] - 2026-06-26
 
 ### Added
