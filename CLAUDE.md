@@ -4,7 +4,7 @@
 
 **Name**: bitbucket-mcp-py
 **Type**: MCP (Model Context Protocol) Server for Bitbucket API
-**Version**: 1.19.0
+**Version**: 1.20.0
 **Python**: 3.12+
 **Container Runtime**: Podman (preferred) or Docker
 
@@ -117,6 +117,13 @@ security add-generic-password -s "bitbucket-mcp" -a "bitbucket_workspace" -w "wo
 - **API Base**: `https://api.bitbucket.org/2.0`
 
 ### MCP Tools (77 total)
+
+> **Tool Annotations (MCP 2025)** — every tool advertises behavioural hints
+> (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) plus a
+> human-readable `title`. Classification is centralised in `conditional_tool`
+> (`src/server.py`) via a name-prefix rule + an override table (`_ANNOTATION_OVERRIDES`)
+> — the 77 decorator sites stay annotation-free. `openWorldHint=False` everywhere
+> (closed domain: one known API).
 
 | Category | Tools |
 |----------|-------|
@@ -282,6 +289,7 @@ Then: `git tag vX.Y.Z && git push origin vX.Y.Z` → GitHub Actions handles the 
 
 ## Recent Changes
 
+- Added MCP 2025 Tool Annotations + human-readable `title` on every tool — `readOnlyHint`/`destructiveHint`/`idempotentHint`/`openWorldHint`. Clients auto-include read-only tools and warn before destructive ops. Classification centralised in `conditional_tool` via a name-prefix rule (`get_`/`list_`→read, `create_`/`add_`→write, `update_`→idempotent write, `delete_`→destructive) + `_ANNOTATION_OVERRIDES` for atypical verbs (`suggest_*`=read-only; `approve_`/`resolve_`/toggles=idempotent; `merge_`/`decline_`/`stop_pipeline`=destructive non-idempotent). `title` auto title-cased + `_TITLE_OVERRIDES`. `openWorldHint=False` everywhere (closed domain). The 77 decorator sites stay unchanged; purely additive metadata, backward compatible (v1.20.0, #59)
 - Added Pipelines Config tools — 14 tools (`get_pipeline_config`, `list_pipeline_variables`, `get_pipeline_variable`, `list_pipeline_schedules`, `get_pipeline_schedule`, `list_pipeline_schedule_executions`, `list_pipeline_caches` enabled; `create/update/delete_pipeline_variable`, `create/update/delete_pipeline_schedule`, `delete_pipeline_cache` disabled). Slim responses `slim_pipeline_config`/`slim_pipeline_variable` (masks secured values)/`slim_pipeline_schedule`/`slim_pipeline_cache`. **API gotchas verified live**: caches use the `pipelines-config` (hyphen) path while variables/schedules use `pipelines_config` (underscore); `get_pipeline_config` requires the `admin:repository` scope (403 otherwise); pipeline list endpoints return 200-empty (not 404) when there are no items, so no `pipelines_disabled` wrapper is needed. Hardened `slim_pipeline_run`/`step` against null `state`/`result` (in-progress runs) (v1.19.0)
 - Added Source & Commits tools — 7 tools (`list_commits`, `get_commit`, `get_commit_comments`, `get_commit_comment`, `add_commit_comment` [disabled], `get_file_content`, `list_directory`); read a file/tree at any commit without cloning, browse commit history. `/src` access is hardened: percent-encoded paths, `..` traversal rejected, `?format=meta` pre-check rejecting directories/oversized/binary files, TOCTOU-safe pinning to the resolved commit hash, tolerant decoding. New transformers `slim_commit_comment`/`slim_source_entry`; `aggregate_pages` gains `follow_redirects` (the `/src` endpoint 302-redirects) (v1.18.0)
 - Added Bitbucket Issue Tracker support — 10 tools (`list_issues`, `get_issue`, `create_issue`, `update_issue`, `delete_issue` [disabled], `get_issue_comments`, `get_issue_comment`, `add_issue_comment`, `update_issue_comment`, `delete_issue_comment` [disabled]); `list_issues` filters via dedicated params + raw BBQL `q` + `sort`; graceful `issue_tracker_disabled` response when the opt-in tracker is off; slim responses `slim_issue`/`slim_issue_comment` (v1.17.0, #50)
