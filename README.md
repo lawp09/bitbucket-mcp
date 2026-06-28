@@ -12,7 +12,7 @@ Connect **Claude Code**, **OpenAI Codex**, **Cursor**, **VS Code (GitHub Copilot
 
 ## Features
 
-- **56 MCP tools** — repositories, pull requests, comments, tasks, diffs, pipelines, build statuses, reviewers, draft PRs, batch review, issue tracker
+- **60+ MCP tools** — repositories, pull requests, comments, tasks, diffs, pipelines (runtime + config), build statuses, reviewers, draft PRs, batch review, issue tracker, commits, source/file browsing
 - **Slim responses** — stripped API noise for lower LLM token usage
 - **Configurable** — enable/disable tools via `configs/tools.json` or `BITBUCKET_TOOLS_CONFIG` env var
 - **Secure credentials** — environment variables or system keychain
@@ -165,13 +165,16 @@ Add to `.vscode/mcp.json` (workspace) or `~/Library/Application Support/Code/Use
 | **PR Discovery** | `get_pull_requests_pending_review` |
 | **Build / CI** | `get_pull_request_statuses`, `get_commit_statuses` |
 | **Pipelines** | `list_pipeline_runs`, `get_pipeline_run`, `get_pipeline_steps`, `get_pipeline_step_logs`, `run_pipeline`, `stop_pipeline` |
+| **Pipelines Config** | `get_pipeline_config`, `list_pipeline_variables`, `get_pipeline_variable`, `create_pipeline_variable`, `update_pipeline_variable`, `delete_pipeline_variable`, `list_pipeline_schedules`, `get_pipeline_schedule`, `list_pipeline_schedule_executions`, `create_pipeline_schedule`, `update_pipeline_schedule`, `delete_pipeline_schedule`, `list_pipeline_caches`, `delete_pipeline_cache` |
 | **Reviewers** | `get_effective_default_reviewers`, `suggest_pull_request_reviewers` |
 | **Draft PR** | `create_draft_pull_request`, `publish_draft_pull_request`, `convert_pull_request_to_draft` |
 | **Batch Review** | `submit_pull_request_batch_review` |
 | **Review Summary** | `get_pull_request_review_summary` |
 | **Issues** | `list_issues`, `get_issue`, `create_issue`, `update_issue`, `delete_issue`, `get_issue_comments`, `get_issue_comment`, `add_issue_comment`, `update_issue_comment`, `delete_issue_comment` |
+| **Commits** | `list_commits`, `get_commit`, `get_commit_comments`, `get_commit_comment`, `add_commit_comment` |
+| **Source** | `get_file_content`, `list_directory` |
 
-> Disabled by default: `merge_pull_request` (safety), `stop_pipeline` (safety), `get_pull_request_patch` (git am format — not useful for AI review), `convert_pull_request_to_draft` (not supported by Bitbucket API), `delete_issue` (safety), `delete_issue_comment` (safety). Enable in `configs/tools.json`.
+> Disabled by default: `merge_pull_request` (safety), `stop_pipeline` (safety), `get_pull_request_patch` (git am format — not useful for AI review), `convert_pull_request_to_draft` (not supported by Bitbucket API), `delete_issue` (safety), `delete_issue_comment` (safety), `add_commit_comment` (write op), `create_pipeline_variable` / `update_pipeline_variable` / `delete_pipeline_variable` (write ops), `create_pipeline_schedule` / `update_pipeline_schedule` / `delete_pipeline_schedule` (write ops), `delete_pipeline_cache` (safety). Enable in `configs/tools.json`.
 
 ### Custom tool configuration
 

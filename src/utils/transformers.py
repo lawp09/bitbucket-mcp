@@ -397,13 +397,14 @@ def slim_activity_list(data: Dict[str, Any]) -> Dict[str, Any]:
 
 def slim_pipeline_run(run: Dict[str, Any]) -> Dict[str, Any]:
     """Slim a single pipeline run."""
-    target = run.get("target", {})
-    ref = target.get("ref_name") or target.get("selector", {}).get("pattern")
+    target = run.get("target") or {}
+    ref = target.get("ref_name") or (target.get("selector") or {}).get("pattern")
+    state = run.get("state") or {}
     return {
         "uuid": run.get("uuid"),
         "build_number": run.get("build_number"),
-        "state": run.get("state", {}).get("name"),
-        "state_result": run.get("state", {}).get("result", {}).get("name"),
+        "state": state.get("name"),
+        "state_result": (state.get("result") or {}).get("name"),
         "target_branch": ref,
         "trigger": run.get("trigger", {}).get("name"),
         "duration_in_seconds": run.get("duration_in_seconds"),
@@ -419,11 +420,12 @@ def slim_pipeline_run_list(data: Dict[str, Any]) -> Dict[str, Any]:
 
 def slim_pipeline_step(step: Dict[str, Any]) -> Dict[str, Any]:
     """Slim a single pipeline step."""
+    state = step.get("state") or {}
     return {
         "uuid": step.get("uuid"),
         "name": step.get("name"),
-        "state": step.get("state", {}).get("name"),
-        "state_result": step.get("state", {}).get("result", {}).get("name"),
+        "state": state.get("name"),
+        "state_result": (state.get("result") or {}).get("name"),
         "duration_in_seconds": step.get("duration_in_seconds"),
         "started_on": step.get("started_on"),
         "completed_on": step.get("completed_on"),
@@ -433,6 +435,94 @@ def slim_pipeline_step(step: Dict[str, Any]) -> Dict[str, Any]:
 def slim_pipeline_step_list(data: Dict[str, Any]) -> Dict[str, Any]:
     """Slim a paginated list of pipeline steps."""
     return _slim_paginated(data, slim_pipeline_step)
+
+
+# ========== Pipelines Config (variables, schedules, caches) ==========
+
+def slim_pipeline_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Slim a repository pipelines configuration object."""
+    build = config.get("build_number_settings") or {}
+    return {
+        "enabled": config.get("enabled"),
+        "next_build_number": build.get("next_build_number"),
+    }
+
+
+def slim_pipeline_variable(variable: Dict[str, Any]) -> Dict[str, Any]:
+    """Slim a pipeline variable.
+
+    Secured variables never expose their value (the API omits it); force
+    ``value`` to None so a secret is never surfaced even if the field leaks.
+    """
+    # Strict check: only an explicit True masks. A null/missing flag means the
+    # variable is not secured (so its value is safe to surface).
+    secured = variable.get("secured") is True
+    return {
+        "uuid": variable.get("uuid"),
+        "key": variable.get("key"),
+        "value": None if secured else variable.get("value"),
+        "secured": secured,
+    }
+
+
+def slim_pipeline_variable_list(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Slim a paginated list of pipeline variables."""
+    return _slim_paginated(data, slim_pipeline_variable)
+
+
+def slim_pipeline_schedule(schedule: Dict[str, Any]) -> Dict[str, Any]:
+    """Slim a pipeline schedule."""
+    target = schedule.get("target") or {}
+    selector = target.get("selector") or {}
+    return {
+        "uuid": schedule.get("uuid"),
+        "enabled": schedule.get("enabled"),
+        "cron_pattern": schedule.get("cron_pattern"),
+        "target_ref": target.get("ref_name"),
+        "selector_pattern": selector.get("pattern"),
+        "created_on": schedule.get("created_on"),
+        "updated_on": schedule.get("updated_on"),
+    }
+
+
+def slim_pipeline_schedule_list(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Slim a paginated list of pipeline schedules."""
+    return _slim_paginated(data, slim_pipeline_schedule)
+
+
+def slim_pipeline_schedule_execution(execution: Dict[str, Any]) -> Dict[str, Any]:
+    """Slim a single scheduled-pipeline execution record."""
+    state = execution.get("state") or {}
+    pipeline = execution.get("pipeline") or {}
+    return {
+        "state": state.get("name"),
+        # result is null while the pipeline is still in progress
+        "state_result": (state.get("result") or {}).get("name"),
+        "pipeline_uuid": pipeline.get("uuid"),
+        "build_number": pipeline.get("build_number"),
+        "created_on": execution.get("created_on"),
+    }
+
+
+def slim_pipeline_schedule_execution_list(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Slim a paginated list of scheduled-pipeline executions."""
+    return _slim_paginated(data, slim_pipeline_schedule_execution)
+
+
+def slim_pipeline_cache(cache: Dict[str, Any]) -> Dict[str, Any]:
+    """Slim a pipeline cache entry."""
+    return {
+        "uuid": cache.get("uuid"),
+        "name": cache.get("name"),
+        "path": cache.get("path"),
+        "file_size_bytes": cache.get("file_size_bytes"),
+        "created_on": cache.get("created_on"),
+    }
+
+
+def slim_pipeline_cache_list(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Slim a paginated list of pipeline caches."""
+    return _slim_paginated(data, slim_pipeline_cache)
 
 
 # ========== Default Reviewers ==========
