@@ -2,12 +2,50 @@
 
 import base64
 import logging
-from typing import Any, Dict, List, Optional
+import urllib.parse
+from typing import Any, Dict, Optional
 import httpx
 
 from .utils.pagination import PaginationConfig, aggregate_pages
 
 logger = logging.getLogger(__name__)
+
+
+# Default size ceiling for get_file_content (256 KiB). Larger files blow up the
+# LLM token budget and are better fetched via git; callers can raise it explicitly.
+# Public so the server layer reuses the same default instead of duplicating the literal.
+DEFAULT_MAX_FILE_BYTES = 256 * 1024
+
+# Mimetypes refused by get_file_content: returning their bytes as text would yield
+# mojibake and a huge useless payload. Kept deliberately narrow so source files
+# with unusual mimetypes (or a null mimetype) are still served.
+_BINARY_MIMETYPE_PREFIXES = ("image/", "audio/", "video/", "font/")
+_BINARY_MIMETYPES = frozenset({
+    "application/octet-stream",
+    "application/zip",
+    "application/gzip",
+    "application/x-tar",
+    "application/x-7z-compressed",
+    "application/x-rar-compressed",
+    "application/x-bzip2",
+    "application/pdf",
+    "application/java-archive",
+    "application/x-executable",
+    "application/x-sharedlib",
+    "application/wasm",
+})
+
+
+def _is_binary_mimetype(mimetype: Optional[str]) -> bool:
+    """Return True for mimetypes that should not be returned as text.
+
+    A missing/empty mimetype returns False (Bitbucket reports null for many plain
+    source files) so the size guard remains the primary protection.
+    """
+    if not mimetype:
+        return False
+    mt = mimetype.lower().split(";")[0].strip()
+    return mt in _BINARY_MIMETYPES or mt.startswith(_BINARY_MIMETYPE_PREFIXES)
 
 
 class IssueTrackerDisabledError(Exception):
@@ -1846,3 +1884,322 @@ class BitbucketClient:
         )
         _raise_if_tracker_disabled(response, ws, repo_slug)
         response.raise_for_status()
+
+    # ========== Commits & Source ==========
+
+    async def list_commits(
+        self,
+        repo_slug: str,
+        revision: Optional[str] = None,
+        workspace: Optional[str] = None,
+        path: Optional[str] = None,
+        include: Optional[str] = None,
+        exclude: Optional[str] = None,
+        page_size: int = 30,
+        max_pages: Optional[int] = 1,
+    ) -> Dict[str, Any]:
+        """
+        List commits for a repository, optionally scoped to a revision/branch.
+
+        Args:
+            repo_slug: Repository slug
+            revision: Branch, tag or commit hash to start from (optional; defaults to
+                all branches). A branch name containing '/' (e.g. ``feature/x``) is
+                ambiguous on this endpoint — resolve it to a hash first if needed.
+            workspace: Workspace name (defaults to self.workspace)
+            path: Restrict history to commits touching this file/directory path
+            include: Only commits reachable from this ref (query filter)
+            exclude: Exclude commits reachable from this ref (query filter)
+            page_size: Items per page (default: 30)
+            max_pages: Maximum pages to fetch (default: 1)
+
+        Returns:
+            Paginated list of commits with aggregated values
+        """
+        ws = workspace or self.workspace
+        config = PaginationConfig(page_size=page_size, max_pages=max_pages)
+        if revision:
+            url = f"/repositories/{ws}/{repo_slug}/commits/{revision}"
+        else:
+            url = f"/repositories/{ws}/{repo_slug}/commits"
+        params: Dict[str, Any] = {}
+        if path:
+            params["path"] = path
+        if include:
+            params["include"] = include
+        if exclude:
+            params["exclude"] = exclude
+        return await aggregate_pages(self.client, url, params, config)
+
+    async def get_commit(
+        self,
+        repo_slug: str,
+        commit: str,
+        workspace: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Get details for a single commit.
+
+        Args:
+            repo_slug: Repository slug
+            commit: Commit hash (a simple branch/tag name also works)
+            workspace: Workspace name (defaults to self.workspace)
+
+        Returns:
+            Commit details
+        """
+        ws = workspace or self.workspace
+        response = await self.client.get(
+            f"/repositories/{ws}/{repo_slug}/commit/{commit}"
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def get_commit_comments(
+        self,
+        repo_slug: str,
+        commit: str,
+        workspace: Optional[str] = None,
+        page_size: int = 10,
+        max_pages: Optional[int] = 1,
+    ) -> Dict[str, Any]:
+        """
+        List comments on a commit with pagination support.
+
+        Args:
+            repo_slug: Repository slug
+            commit: Commit hash
+            workspace: Workspace name (defaults to self.workspace)
+            page_size: Items per page (default: 10)
+            max_pages: Maximum pages to fetch (default: 1)
+
+        Returns:
+            Comments with aggregated values
+        """
+        ws = workspace or self.workspace
+        config = PaginationConfig(page_size=page_size, max_pages=max_pages)
+        return await aggregate_pages(
+            self.client,
+            f"/repositories/{ws}/{repo_slug}/commit/{commit}/comments",
+            {},
+            config,
+        )
+
+    async def get_commit_comment(
+        self,
+        repo_slug: str,
+        commit: str,
+        comment_id: str,
+        workspace: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Get a specific comment on a commit.
+
+        Args:
+            repo_slug: Repository slug
+            commit: Commit hash
+            comment_id: Comment ID
+            workspace: Workspace name (defaults to self.workspace)
+
+        Returns:
+            Comment details
+        """
+        ws = workspace or self.workspace
+        response = await self.client.get(
+            f"/repositories/{ws}/{repo_slug}/commit/{commit}/comments/{comment_id}"
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def add_commit_comment(
+        self,
+        repo_slug: str,
+        commit: str,
+        content: str,
+        workspace: Optional[str] = None,
+        inline_path: Optional[str] = None,
+        inline_from: Optional[int] = None,
+        inline_to: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        Add a comment to a commit (general or inline).
+
+        Args:
+            repo_slug: Repository slug
+            commit: Commit hash
+            content: Comment content (markdown)
+            workspace: Workspace name (defaults to self.workspace)
+            inline_path: File path for an inline comment
+            inline_from: Line number in the old version (deleted/modified lines)
+            inline_to: Line number in the new version (added/modified lines)
+
+        Returns:
+            Created comment details
+        """
+        ws = workspace or self.workspace
+        if not inline_path and (inline_from is not None or inline_to is not None):
+            raise ValueError(
+                "inline_path is required when inline_from/inline_to is provided."
+            )
+        payload: Dict[str, Any] = {"content": {"raw": content}}
+        if inline_path:
+            inline_data: Dict[str, Any] = {"path": inline_path}
+            if inline_from is not None:
+                inline_data["from"] = inline_from
+            if inline_to is not None:
+                inline_data["to"] = inline_to
+            payload["inline"] = inline_data
+        response = await self.client.post(
+            f"/repositories/{ws}/{repo_slug}/commit/{commit}/comments",
+            json=payload,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def _src_url(
+        self,
+        repo_slug: str,
+        commit: str,
+        path: str,
+        workspace: Optional[str] = None,
+    ) -> str:
+        """Build a percent-encoded ``/src`` URL.
+
+        The user-supplied ``path`` is URL-encoded (preserving '/') so file names
+        containing '?', '#', '%' or spaces cannot break or inject into the request.
+        Parent-directory segments ('..') are rejected: ``quote`` leaves dots intact,
+        so an unchecked '..' could let the request escape the target ``repo_slug``.
+        """
+        ws = workspace or self.workspace
+        clean = (path or "").lstrip("/")
+        if any(segment == ".." for segment in clean.split("/")):
+            raise ValueError(
+                f"Invalid path '{path}': parent-directory segments ('..') are not allowed."
+            )
+        encoded = urllib.parse.quote(clean, safe="/")
+        base = f"/repositories/{ws}/{repo_slug}/src/{commit}"
+        return f"{base}/{encoded}" if encoded else f"{base}/"
+
+    async def _get_src_meta(
+        self,
+        repo_slug: str,
+        commit: str,
+        path: str,
+        workspace: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Fetch ``?format=meta`` metadata for a source path (file or directory)."""
+        url = self._src_url(repo_slug, commit, path, workspace)
+        response = await self.client.get(
+            url, params={"format": "meta"}, follow_redirects=True
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def get_file_content(
+        self,
+        repo_slug: str,
+        commit: str,
+        path: str,
+        workspace: Optional[str] = None,
+        max_bytes: int = DEFAULT_MAX_FILE_BYTES,
+    ) -> str:
+        """
+        Get the raw text content of a file at a given commit/branch.
+
+        A ``?format=meta`` pre-check guards the call: it rejects directories,
+        oversized files (> ``max_bytes``) and binary mimetypes before downloading.
+        The content is then fetched from the exact commit hash resolved by the
+        pre-check (not the original ref), so a concurrent push cannot swap in a
+        different file between the two requests. A final byte-length check catches
+        files whose metadata reported no size.
+
+        Args:
+            repo_slug: Repository slug
+            commit: Commit hash (a simple branch/tag name also works; a branch name
+                containing '/' is ambiguous on ``/src`` — resolve it to a hash first)
+            path: File path within the repository
+            workspace: Workspace name (defaults to self.workspace)
+            max_bytes: Maximum file size to return (default: 256 KiB)
+
+        Returns:
+            File content as text
+
+        Raises:
+            ValueError: If the path is a directory, exceeds ``max_bytes``, or is binary
+        """
+        meta = await self._get_src_meta(repo_slug, commit, path, workspace)
+        if meta.get("type") == "commit_directory":
+            raise ValueError(
+                f"'{path}' is a directory, not a file; use list_directory instead."
+            )
+        size = meta.get("size")
+        if isinstance(size, int) and size > max_bytes:
+            raise ValueError(
+                f"File '{path}' is {size} bytes, exceeding the {max_bytes}-byte limit; "
+                "fetch it via git or request a narrower path."
+            )
+        mimetype = meta.get("mimetype")
+        if _is_binary_mimetype(mimetype):
+            raise ValueError(
+                f"File '{path}' has a binary mimetype ({mimetype}); "
+                "refusing to return raw bytes as text."
+            )
+        # Pin the content fetch to the commit the metadata resolved to (closes the
+        # TOCTOU window when ``commit`` is a moving branch ref).
+        pinned = (meta.get("commit") or {}).get("hash") or commit
+        url = self._src_url(repo_slug, pinned, path, workspace)
+        response = await self.client.get(url, follow_redirects=True)
+        response.raise_for_status()
+        # Safety net for files whose metadata reported size=None: enforce the cap
+        # on the actual payload so an oversized blob is never returned as text.
+        raw = response.content
+        if len(raw) > max_bytes:
+            raise ValueError(
+                f"File '{path}' is {len(raw)} bytes, exceeding the "
+                f"{max_bytes}-byte limit; fetch it via git or request a narrower path."
+            )
+        # Decode tolerantly: a text file in a non-UTF-8 charset without a declared
+        # encoding must not crash the call (binary files are already rejected above).
+        return raw.decode(response.encoding or "utf-8", errors="replace")
+
+    async def list_directory(
+        self,
+        repo_slug: str,
+        commit: str,
+        path: str = "",
+        workspace: Optional[str] = None,
+        page_size: int = 50,
+        max_pages: Optional[int] = 1,
+    ) -> Dict[str, Any]:
+        """
+        List the entries of a directory at a given commit/branch.
+
+        A ``?format=meta`` pre-check gives a clear error when the path is a file
+        (instead of a JSON decode failure on the raw content).
+
+        Args:
+            repo_slug: Repository slug
+            commit: Commit hash (a simple branch/tag name also works)
+            path: Directory path within the repository (empty = repository root)
+            workspace: Workspace name (defaults to self.workspace)
+            page_size: Items per page (default: 50)
+            max_pages: Maximum pages to fetch (default: 1)
+
+        Returns:
+            Paginated directory listing with aggregated values
+
+        Raises:
+            ValueError: If the path points to a file
+        """
+        meta = await self._get_src_meta(repo_slug, commit, path, workspace)
+        if meta.get("type") == "commit_file":
+            raise ValueError(
+                f"'{path}' is a file, not a directory; use get_file_content instead."
+            )
+        config = PaginationConfig(page_size=page_size, max_pages=max_pages)
+        # Pin to the resolved commit hash for a consistent listing (see get_file_content).
+        pinned = (meta.get("commit") or {}).get("hash") or commit
+        url = self._src_url(repo_slug, pinned, path, workspace)
+        return await aggregate_pages(
+            self.client, url, {}, config, follow_redirects=True
+        )

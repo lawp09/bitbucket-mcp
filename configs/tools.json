@@ -164,6 +164,36 @@
       "get_commit_statuses": {
         "enabled": true,
         "description": "Get build/CI statuses for a specific commit (Jenkins, CI/CD)"
+      },
+      "list_commits": {
+        "enabled": true,
+        "description": "List commits for a repository (optionally scoped to a revision/path)"
+      },
+      "get_commit": {
+        "enabled": true,
+        "description": "Get details for a single commit"
+      },
+      "get_commit_comments": {
+        "enabled": true,
+        "description": "List comments on a commit"
+      },
+      "get_commit_comment": {
+        "enabled": true,
+        "description": "Get a specific comment on a commit"
+      },
+      "add_commit_comment": {
+        "enabled": false,
+        "description": "Add a comment to a commit (disabled by default — write operation)"
+      }
+    },
+    "source": {
+      "get_file_content": {
+        "enabled": true,
+        "description": "Get the raw text content of a file at a commit/branch (size/binary guarded)"
+      },
+      "list_directory": {
+        "enabled": true,
+        "description": "List the entries of a directory at a commit/branch"
       }
     },
     "pipelines": {

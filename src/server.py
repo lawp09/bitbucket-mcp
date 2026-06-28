@@ -9,15 +9,17 @@ import logging
 from pathlib import Path
 from typing import Optional, Dict, Any
 from mcp.server.fastmcp import FastMCP
-from .client import BitbucketClient, IssueTrackerDisabledError
+from .client import BitbucketClient, IssueTrackerDisabledError, DEFAULT_MAX_FILE_BYTES
 from .utils.credentials import get_credentials
 from .utils.transformers import (
     slim_repository, slim_repository_list, slim_tag_list,
     slim_pull_request, slim_pull_request_list, slim_pull_request_created,
     slim_status, slim_status_list,
-    slim_commit_list,
+    slim_commit, slim_commit_list,
+    slim_source_list,
     slim_diffstat_entry, slim_diffstat_list,
     slim_comment, slim_comment_list,
+    slim_commit_comment, slim_commit_comment_list,
     slim_activity_list,
     slim_pipeline_run, slim_pipeline_run_list,
     slim_pipeline_step_list,
@@ -2045,3 +2047,206 @@ async def delete_issue_comment(
     client = get_client()
     await client.delete_issue_comment(repo_slug, issue_id, comment_id, workspace)
     return {"deleted": True, "comment_id": comment_id}
+
+
+# ========== Commits & Source Tools ==========
+
+@conditional_tool()
+async def list_commits(
+    repo_slug: str,
+    revision: Optional[str] = None,
+    workspace: Optional[str] = None,
+    path: Optional[str] = None,
+    include: Optional[str] = None,
+    exclude: Optional[str] = None,
+    page_size: int = 30,
+    max_pages: Optional[int] = 1
+) -> Dict[str, Any]:
+    """
+    List commits for a repository, optionally scoped to a revision or path.
+
+    Args:
+        repo_slug: Repository slug
+        revision: Branch, tag or commit hash to start from (optional; defaults to all
+            branches). A branch name containing '/' is ambiguous here — resolve it to a
+            commit hash first (e.g. via get_branch) if listing fails.
+        workspace: Workspace name (optional, defaults to configured workspace)
+        path: Restrict history to commits touching this file/directory path
+        include: Only commits reachable from this ref
+        exclude: Exclude commits reachable from this ref
+        page_size: Items per page (default: 30)
+        max_pages: Maximum pages to fetch (default: 1, max recommended: 10)
+
+    Returns:
+        Paginated list of commits
+    """
+    client = get_client()
+    result = await client.list_commits(
+        repo_slug, revision, workspace, path, include, exclude, page_size, max_pages
+    )
+    return slim_commit_list(result)
+
+
+@conditional_tool()
+async def get_commit(
+    repo_slug: str,
+    commit: str,
+    workspace: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Get details for a single commit.
+
+    Args:
+        repo_slug: Repository slug
+        commit: Commit hash (a simple branch/tag name also works)
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Commit details
+    """
+    client = get_client()
+    result = await client.get_commit(repo_slug, commit, workspace)
+    return slim_commit(result)
+
+
+@conditional_tool()
+async def get_commit_comments(
+    repo_slug: str,
+    commit: str,
+    workspace: Optional[str] = None,
+    page_size: int = 10,
+    max_pages: Optional[int] = 1
+) -> Dict[str, Any]:
+    """
+    List comments on a commit with pagination support.
+
+    Args:
+        repo_slug: Repository slug
+        commit: Commit hash
+        workspace: Workspace name (optional, defaults to configured workspace)
+        page_size: Items per page (default: 10)
+        max_pages: Maximum pages to fetch (default: 1, max recommended: 10)
+
+    Returns:
+        Paginated list of commit comments
+    """
+    client = get_client()
+    result = await client.get_commit_comments(
+        repo_slug, commit, workspace, page_size, max_pages
+    )
+    return slim_commit_comment_list(result)
+
+
+@conditional_tool()
+async def get_commit_comment(
+    repo_slug: str,
+    commit: str,
+    comment_id: str,
+    workspace: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Get a specific comment on a commit.
+
+    Args:
+        repo_slug: Repository slug
+        commit: Commit hash
+        comment_id: Comment ID
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Commit comment details
+    """
+    client = get_client()
+    result = await client.get_commit_comment(repo_slug, commit, comment_id, workspace)
+    return slim_commit_comment(result)
+
+
+@conditional_tool()
+async def add_commit_comment(
+    repo_slug: str,
+    commit: str,
+    content: str,
+    workspace: Optional[str] = None,
+    inline_path: Optional[str] = None,
+    inline_from: Optional[int] = None,
+    inline_to: Optional[int] = None
+) -> Dict[str, Any]:
+    """
+    Add a comment to a commit (general or inline).
+
+    Args:
+        repo_slug: Repository slug
+        commit: Commit hash
+        content: Comment content in markdown format
+        workspace: Workspace name (optional, defaults to configured workspace)
+        inline_path: Path to the file in the repository (for inline comments)
+        inline_from: Line number in the old version of the file
+        inline_to: Line number in the new version of the file
+
+    Returns:
+        Created comment details
+    """
+    client = get_client()
+    result = await client.add_commit_comment(
+        repo_slug, commit, content, workspace, inline_path, inline_from, inline_to
+    )
+    return slim_commit_comment(result)
+
+
+@conditional_tool()
+async def get_file_content(
+    repo_slug: str,
+    commit: str,
+    path: str,
+    workspace: Optional[str] = None,
+    max_bytes: int = DEFAULT_MAX_FILE_BYTES
+) -> str:
+    """
+    Get the raw text content of a file at a given commit or branch.
+
+    A metadata pre-check rejects directories, oversized files (> max_bytes) and
+    binary files before downloading, to protect the token budget.
+
+    Args:
+        repo_slug: Repository slug
+        commit: Commit hash (a simple branch/tag name also works; a branch name
+            containing '/' is ambiguous on /src — resolve it to a hash first)
+        path: File path within the repository
+        workspace: Workspace name (optional, defaults to configured workspace)
+        max_bytes: Maximum file size to return (default: 262144 = 256 KiB)
+
+    Returns:
+        File content as text
+    """
+    client = get_client()
+    return await client.get_file_content(repo_slug, commit, path, workspace, max_bytes)
+
+
+@conditional_tool()
+async def list_directory(
+    repo_slug: str,
+    commit: str,
+    path: str = "",
+    workspace: Optional[str] = None,
+    page_size: int = 50,
+    max_pages: Optional[int] = 1
+) -> Dict[str, Any]:
+    """
+    List the entries (files and sub-directories) of a directory at a commit/branch.
+
+    Args:
+        repo_slug: Repository slug
+        commit: Commit hash (a simple branch/tag name also works)
+        path: Directory path within the repository (empty = repository root)
+        workspace: Workspace name (optional, defaults to configured workspace)
+        page_size: Items per page (default: 50)
+        max_pages: Maximum pages to fetch (default: 1, max recommended: 10)
+
+    Returns:
+        Paginated directory listing (path, type, size, mimetype per entry)
+    """
+    client = get_client()
+    result = await client.list_directory(
+        repo_slug, commit, path, workspace, page_size, max_pages
+    )
+    return slim_source_list(result)
