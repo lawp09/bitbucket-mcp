@@ -41,6 +41,12 @@ from .utils.transformers import (
     slim_workspace_permission_list,
     slim_repository_permission_list,
 )
+from .prompts import (
+    build_review_pull_request_prompt,
+    build_debug_pipeline_failure_prompt,
+    build_summarize_repository_prompt,
+    build_onboard_reviewer_prompt,
+)
 
 # Configuration logging vers stderr uniquement (container-friendly)
 logging.basicConfig(
@@ -97,7 +103,12 @@ def load_tools_config(config_path: Optional[str] = None) -> Dict[str, bool]:
             for category, tools in config.get("tools", {}).items():
                 for tool_name, tool_config in tools.items():
                     enabled_tools[tool_name] = tool_config.get("enabled", True)
-            logger.info(f"Enabled tools: {sum(enabled_tools.values())}/{len(enabled_tools)}")
+            # Prompts live in a distinct top-level "prompts" key (flat name -> config)
+            # so they share the enable/disable mechanism without polluting the "tools"
+            # namespace used by the annotation guard-rails.
+            for prompt_name, prompt_config in config.get("prompts", {}).items():
+                enabled_tools[prompt_name] = prompt_config.get("enabled", True)
+            logger.info(f"Enabled primitives: {sum(enabled_tools.values())}/{len(enabled_tools)}")
         elif is_explicit:
             raise FileNotFoundError(f"Tools config not found ({source}={resolved_path})")
         else:
@@ -255,6 +266,27 @@ def conditional_tool(structured_output: bool = True):
             )(func)
         else:
             logger.info(f"Tool disabled by configuration: {tool_name}")
+            return func
+    return decorator
+
+
+def conditional_prompt():
+    """
+    Decorator that conditionally registers an MCP prompt based on configuration.
+
+    Mirrors ``conditional_tool`` for the Prompts primitive: if the prompt name is
+    enabled (``configs/tools.json`` top-level ``prompts`` section), it is registered
+    via ``mcp.prompt()``; otherwise the function is returned untouched (not exposed
+    in ``prompts/list``). FastMCP derives the prompt description from the wrapper's
+    docstring, so each wrapped function must carry one.
+    """
+    def decorator(func):
+        prompt_name = func.__name__
+        if is_tool_enabled(prompt_name):
+            logger.debug(f"Registering prompt: {prompt_name}")
+            return mcp.prompt()(func)
+        else:
+            logger.info(f"Prompt disabled by configuration: {prompt_name}")
             return func
     return decorator
 
@@ -3241,3 +3273,34 @@ async def list_repository_permissions(
     client = get_client()
     result = await client.list_repository_permissions(repo_slug, workspace, page_size, max_pages)
     return slim_repository_permission_list(result)
+
+
+# ========== MCP Prompts ==========
+#
+# Prompts are parameterised templates surfaced as slash commands by MCP clients.
+# Each wrapper delegates to a pure builder in src/prompts.py and returns a string,
+# which FastMCP wraps into a user PromptMessage. The wrapper docstring is what the
+# client shows as the prompt description, so keep it meaningful.
+
+@conditional_prompt()
+async def review_pull_request(repo_slug: str, pull_request_id: str) -> str:
+    """Perform a complete AI review of a Bitbucket pull request."""
+    return build_review_pull_request_prompt(repo_slug, pull_request_id)
+
+
+@conditional_prompt()
+async def debug_pipeline_failure(repo_slug: str, pipeline_uuid: str) -> str:
+    """Diagnose why a Bitbucket pipeline run failed, from its logs."""
+    return build_debug_pipeline_failure_prompt(repo_slug, pipeline_uuid)
+
+
+@conditional_prompt()
+async def summarize_repository(repo_slug: str) -> str:
+    """Summarize a Bitbucket repository: purpose, recent activity and health."""
+    return build_summarize_repository_prompt(repo_slug)
+
+
+@conditional_prompt()
+async def onboard_reviewer(repo_slug: str, pull_request_id: str) -> str:
+    """Help a new reviewer get up to speed on a Bitbucket pull request."""
+    return build_onboard_reviewer_prompt(repo_slug, pull_request_id)

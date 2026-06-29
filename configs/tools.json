@@ -408,5 +408,23 @@
         "description": "List user permissions for a specific repository"
       }
     }
+  },
+  "prompts": {
+    "review_pull_request": {
+      "enabled": true,
+      "description": "Slash command: complete AI review of a pull request"
+    },
+    "debug_pipeline_failure": {
+      "enabled": true,
+      "description": "Slash command: diagnose a failed pipeline run from its logs"
+    },
+    "summarize_repository": {
+      "enabled": true,
+      "description": "Slash command: summarize a repository (purpose, activity, health)"
+    },
+    "onboard_reviewer": {
+      "enabled": true,
+      "description": "Slash command: help a new reviewer get up to speed on a PR"
+    }
   }
 }
