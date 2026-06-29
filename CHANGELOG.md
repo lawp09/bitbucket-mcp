@@ -1,5 +1,16 @@
 # Changelog - Bitbucket MCP Server Python
 
+## [1.22.0] - 2026-06-29
+
+### Added
+- Branch Restrictions & Workspace governance tools (issue #63) — 9 tools. Branch Restrictions (repo-level): `list_branch_restrictions`, `get_branch_restriction` (enabled); `create_branch_restriction`, `update_branch_restriction`, `delete_branch_restriction` (disabled). Workspace (workspace-level, first `/workspaces/` endpoints): `list_workspace_members`, `get_workspace_member`, `list_workspace_permissions`, `list_repository_permissions` (all enabled). Slim responses `slim_branch_restriction` / `slim_workspace_membership` / `slim_workspace_permission` / `slim_repository_permission`. Enterprise governance/compliance use cases, uncovered by any competitor Bitbucket MCP.
+- **API specifics handled**: the `branch-restrictions` collection requires a trailing slash (404 otherwise, BCLOUD-17211) while the `/{id}` resource does not; workspace endpoints are standard (no trailing slash). The `/members` endpoint returns `workspace_membership` objects **without** a `permission` field — per-user roles live on the separate `/permissions` endpoint, so memberships and permissions use distinct transformers. User identifiers are `account_id`/`uuid` (usernames removed from API URLs in 2019 for GDPR), preserved by a dedicated `_slim_workspace_user`. The `PUT` update requires `kind` in the body.
+
+### Notes
+- Branch restriction read tools require the `repository` scope (`repository:admin` may be needed per repo config); write tools require `repository:admin`. Workspace tools require the `account` scope.
+
+---
+
 ## [1.21.0] - 2026-06-28
 
 ### Added

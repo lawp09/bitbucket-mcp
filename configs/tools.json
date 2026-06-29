@@ -367,6 +367,46 @@
         "enabled": false,
         "description": "Delete a deployment environment variable (disabled by default — safety)"
       }
+    },
+    "branch_restrictions": {
+      "list_branch_restrictions": {
+        "enabled": true,
+        "description": "List branch restrictions (branch protection rules)"
+      },
+      "get_branch_restriction": {
+        "enabled": true,
+        "description": "Get a single branch restriction"
+      },
+      "create_branch_restriction": {
+        "enabled": false,
+        "description": "Create a branch restriction (disabled by default — write op, repository:admin)"
+      },
+      "update_branch_restriction": {
+        "enabled": false,
+        "description": "Update a branch restriction (disabled by default — write op)"
+      },
+      "delete_branch_restriction": {
+        "enabled": false,
+        "description": "Delete a branch restriction (disabled by default — safety)"
+      }
+    },
+    "workspace": {
+      "list_workspace_members": {
+        "enabled": true,
+        "description": "List workspace members (requires account scope)"
+      },
+      "get_workspace_member": {
+        "enabled": true,
+        "description": "Get a single workspace member"
+      },
+      "list_workspace_permissions": {
+        "enabled": true,
+        "description": "List workspace user permissions (roles)"
+      },
+      "list_repository_permissions": {
+        "enabled": true,
+        "description": "List user permissions for a specific repository"
+      }
     }
   }
 }
