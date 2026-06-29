@@ -1,5 +1,20 @@
 # Changelog - Bitbucket MCP Server Python
 
+## [1.21.0] - 2026-06-28
+
+### Added
+- Deployments & Environments tools (issue #61) — 10 tools. Read (enabled): `list_environments`, `get_environment`, `list_deployments`, `get_deployment`, `list_deployment_variables`. Write (disabled by default): `create_environment`, `delete_environment`, `create_deployment_variable`, `update_deployment_variable`, `delete_deployment_variable`. Slim responses `slim_environment` / `slim_deployment` / `slim_deployment_variable` (the latter masks `secured` values to `null` at every exit point — list, get, create, update). No competitor Bitbucket MCP covers these endpoints.
+- **API specifics handled**: the `/environments/` and `/deployments/` collection endpoints require a trailing slash (404 otherwise); deployment variables live under `deployments_config` (underscore, like pipeline variables, not the hyphenated caches path); deployment state is read via `state.status.name` (not `state.result.name` as for pipeline runs) and the deployed commit from `deployable.commit.hash`.
+
+### Deviations from the issue
+- **No `update_environment`** — Bitbucket exposes no `PUT /environments/{uuid}` (modification is only possible via `POST .../changes` for locking/restrictions, out of scope). 10 tools instead of the 11 listed.
+- **No environment filter on `list_deployments`** — the API has no server-side filter for deployments by environment (BCLOUD-18729); consumers filter on the slimmed `environment` field.
+
+### Notes
+- Read tools require the `deployment` OAuth scope; write tools require `deployment:write`.
+
+---
+
 ## [1.20.0] - 2026-06-28
 
 ### Added

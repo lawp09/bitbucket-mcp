@@ -33,6 +33,9 @@ from .utils.transformers import (
     slim_task, slim_task_list,
     slim_issue, slim_issue_list,
     slim_issue_comment, slim_issue_comment_list,
+    slim_environment, slim_environment_list,
+    slim_deployment, slim_deployment_list,
+    slim_deployment_variable, slim_deployment_variable_list,
 )
 
 # Configuration logging vers stderr uniquement (container-friendly)
@@ -2707,3 +2710,282 @@ async def delete_pipeline_cache(
     client = get_client()
     await client.delete_pipeline_cache(repo_slug, cache_uuid, workspace)
     return {"deleted": True, "cache_uuid": cache_uuid}
+
+
+# ========== Deployments & Environments Tools ==========
+
+@conditional_tool()
+async def list_environments(
+    repo_slug: str,
+    workspace: Optional[str] = None,
+    page_size: int = 20,
+    max_pages: Optional[int] = 1
+) -> Dict[str, Any]:
+    """
+    List deployment environments (staging, production, etc.) for a repository.
+
+    Requires the `deployment` OAuth scope.
+
+    Args:
+        repo_slug: Repository slug
+        workspace: Workspace name (optional, defaults to configured workspace)
+        page_size: Items per page (default: 20)
+        max_pages: Maximum pages to fetch (default: 1, max recommended: 10)
+
+    Returns:
+        Paginated list of environments
+    """
+    client = get_client()
+    result = await client.list_environments(repo_slug, workspace, page_size, max_pages)
+    return slim_environment_list(result)
+
+
+@conditional_tool()
+async def get_environment(
+    repo_slug: str,
+    environment_uuid: str,
+    workspace: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Get a single deployment environment.
+
+    Requires the `deployment` OAuth scope.
+
+    Args:
+        repo_slug: Repository slug
+        environment_uuid: Environment UUID
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Environment details
+    """
+    client = get_client()
+    result = await client.get_environment(repo_slug, environment_uuid, workspace)
+    return slim_environment(result)
+
+
+@conditional_tool()
+async def list_deployments(
+    repo_slug: str,
+    workspace: Optional[str] = None,
+    page_size: int = 20,
+    max_pages: Optional[int] = 1
+) -> Dict[str, Any]:
+    """
+    List deployments for a repository (deployment history, most recent first).
+
+    The Bitbucket API cannot filter deployments by environment server-side; filter
+    on the `environment` field of the returned items instead. Requires the
+    `deployment` OAuth scope.
+
+    Args:
+        repo_slug: Repository slug
+        workspace: Workspace name (optional, defaults to configured workspace)
+        page_size: Items per page (default: 20)
+        max_pages: Maximum pages to fetch (default: 1, max recommended: 10)
+
+    Returns:
+        Paginated list of deployments
+    """
+    client = get_client()
+    result = await client.list_deployments(repo_slug, workspace, page_size, max_pages)
+    return slim_deployment_list(result)
+
+
+@conditional_tool()
+async def get_deployment(
+    repo_slug: str,
+    deployment_uuid: str,
+    workspace: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Get a single deployment (state, environment, deployed commit).
+
+    Requires the `deployment` OAuth scope.
+
+    Args:
+        repo_slug: Repository slug
+        deployment_uuid: Deployment UUID
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Deployment details (state, status, environment, commit)
+    """
+    client = get_client()
+    result = await client.get_deployment(repo_slug, deployment_uuid, workspace)
+    return slim_deployment(result)
+
+
+@conditional_tool()
+async def list_deployment_variables(
+    repo_slug: str,
+    environment_uuid: str,
+    workspace: Optional[str] = None,
+    page_size: int = 20,
+    max_pages: Optional[int] = 1
+) -> Dict[str, Any]:
+    """
+    List the variables of a deployment environment.
+
+    Secured variables never expose their value (returned as null). Requires the
+    `deployment` OAuth scope.
+
+    Args:
+        repo_slug: Repository slug
+        environment_uuid: Environment UUID
+        workspace: Workspace name (optional, defaults to configured workspace)
+        page_size: Items per page (default: 20)
+        max_pages: Maximum pages to fetch (default: 1, max recommended: 10)
+
+    Returns:
+        Paginated list of deployment variables
+    """
+    client = get_client()
+    result = await client.list_deployment_variables(
+        repo_slug, environment_uuid, workspace, page_size, max_pages
+    )
+    return slim_deployment_variable_list(result)
+
+
+@conditional_tool()
+async def create_environment(
+    repo_slug: str,
+    name: str,
+    environment_type: str = "Test",
+    workspace: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Create a deployment environment.
+
+    Requires the `deployment:write` OAuth scope.
+
+    Args:
+        repo_slug: Repository slug
+        name: Environment name
+        environment_type: One of "Test", "Staging", "Production" (default: "Test")
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Created environment
+    """
+    client = get_client()
+    result = await client.create_environment(repo_slug, name, environment_type, workspace)
+    return slim_environment(result)
+
+
+@conditional_tool()
+async def delete_environment(
+    repo_slug: str,
+    environment_uuid: str,
+    workspace: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Delete a deployment environment.
+
+    Requires the `deployment:write` OAuth scope.
+
+    Args:
+        repo_slug: Repository slug
+        environment_uuid: Environment UUID
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Confirmation {"deleted": True, "environment_uuid": ...}
+    """
+    client = get_client()
+    await client.delete_environment(repo_slug, environment_uuid, workspace)
+    return {"deleted": True, "environment_uuid": environment_uuid}
+
+
+@conditional_tool()
+async def create_deployment_variable(
+    repo_slug: str,
+    environment_uuid: str,
+    key: str,
+    value: str,
+    secured: bool = False,
+    workspace: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Create a deployment environment variable.
+
+    Requires the `deployment:write` OAuth scope.
+
+    Args:
+        repo_slug: Repository slug
+        environment_uuid: Environment UUID
+        key: Variable name
+        value: Variable value
+        secured: Whether the value is secured/masked (default: False)
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Created variable (value is null if secured)
+    """
+    client = get_client()
+    result = await client.create_deployment_variable(
+        repo_slug, environment_uuid, key, value, secured, workspace
+    )
+    return slim_deployment_variable(result)
+
+
+@conditional_tool()
+async def update_deployment_variable(
+    repo_slug: str,
+    environment_uuid: str,
+    variable_uuid: str,
+    key: Optional[str] = None,
+    value: Optional[str] = None,
+    secured: Optional[bool] = None,
+    workspace: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Update a deployment environment variable (partial update).
+
+    Requires the `deployment:write` OAuth scope.
+
+    Args:
+        repo_slug: Repository slug
+        environment_uuid: Environment UUID
+        variable_uuid: Variable UUID
+        key: New variable name (optional)
+        value: New variable value (optional)
+        secured: New secured flag (optional)
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Updated variable (value is null if secured)
+    """
+    client = get_client()
+    result = await client.update_deployment_variable(
+        repo_slug, environment_uuid, variable_uuid, key, value, secured, workspace
+    )
+    return slim_deployment_variable(result)
+
+
+@conditional_tool()
+async def delete_deployment_variable(
+    repo_slug: str,
+    environment_uuid: str,
+    variable_uuid: str,
+    workspace: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Delete a deployment environment variable.
+
+    Requires the `deployment:write` OAuth scope.
+
+    Args:
+        repo_slug: Repository slug
+        environment_uuid: Environment UUID
+        variable_uuid: Variable UUID
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Confirmation {"deleted": True, "variable_uuid": ...}
+    """
+    client = get_client()
+    await client.delete_deployment_variable(
+        repo_slug, environment_uuid, variable_uuid, workspace
+    )
+    return {"deleted": True, "variable_uuid": variable_uuid}

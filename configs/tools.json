@@ -325,6 +325,48 @@
         "enabled": false,
         "description": "Delete a comment on an issue (disabled by default for safety)"
       }
+    },
+    "deployments": {
+      "list_environments": {
+        "enabled": true,
+        "description": "List deployment environments (requires deployment scope)"
+      },
+      "get_environment": {
+        "enabled": true,
+        "description": "Get a single deployment environment"
+      },
+      "list_deployments": {
+        "enabled": true,
+        "description": "List deployments (history); filter by environment client-side"
+      },
+      "get_deployment": {
+        "enabled": true,
+        "description": "Get a single deployment (state, environment, commit)"
+      },
+      "list_deployment_variables": {
+        "enabled": true,
+        "description": "List deployment environment variables (secured values masked)"
+      },
+      "create_environment": {
+        "enabled": false,
+        "description": "Create a deployment environment (disabled by default — write op, deployment:write)"
+      },
+      "delete_environment": {
+        "enabled": false,
+        "description": "Delete a deployment environment (disabled by default — safety)"
+      },
+      "create_deployment_variable": {
+        "enabled": false,
+        "description": "Create a deployment environment variable (disabled by default — write op)"
+      },
+      "update_deployment_variable": {
+        "enabled": false,
+        "description": "Update a deployment environment variable (disabled by default — write op)"
+      },
+      "delete_deployment_variable": {
+        "enabled": false,
+        "description": "Delete a deployment environment variable (disabled by default — safety)"
+      }
     }
   }
 }
