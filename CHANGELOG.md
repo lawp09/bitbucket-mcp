@@ -5,9 +5,12 @@
 ### Added
 - Branch Restrictions & Workspace governance tools (issue #63) — 9 tools. Branch Restrictions (repo-level): `list_branch_restrictions`, `get_branch_restriction` (enabled); `create_branch_restriction`, `update_branch_restriction`, `delete_branch_restriction` (disabled). Workspace (workspace-level, first `/workspaces/` endpoints): `list_workspace_members`, `get_workspace_member`, `list_workspace_permissions`, `list_repository_permissions` (all enabled). Slim responses `slim_branch_restriction` / `slim_workspace_membership` / `slim_workspace_permission` / `slim_repository_permission`. Enterprise governance/compliance use cases, uncovered by any competitor Bitbucket MCP.
 - **API specifics handled**: the `branch-restrictions` collection requires a trailing slash (404 otherwise, BCLOUD-17211) while the `/{id}` resource does not; workspace endpoints are standard (no trailing slash). The `/members` endpoint returns `workspace_membership` objects **without** a `permission` field — per-user roles live on the separate `/permissions` endpoint, so memberships and permissions use distinct transformers. User identifiers are `account_id`/`uuid` (usernames removed from API URLs in 2019 for GDPR), preserved by a dedicated `_slim_workspace_user`. The `PUT` update requires `kind` in the body.
+- MCP Prompts primitive (issue #60) — 4 parameterised prompt templates surfaced as slash commands by compatible clients: `review_pull_request`, `debug_pipeline_failure`, `summarize_repository`, `onboard_reviewer`. Each orchestrates a sequence of existing tools and asks for a structured output. No competitor Bitbucket MCP exposes prompts.
+- New `src/prompts.py` module holding pure template builders (unit-testable without FastMCP), and a `conditional_prompt()` decorator mirroring `conditional_tool`. Prompts are enabled/disabled in `configs/tools.json` under a new top-level `prompts` key (kept separate from `tools` so the annotation guard-rails are untouched). Prompt wrappers carry docstrings so the MCP `description` is populated.
 
 ### Notes
 - Branch restriction read tools require the `repository` scope (`repository:admin` may be needed per repo config); write tools require `repository:admin`. Workspace tools require the `account` scope.
+- Prompts are read-only orchestration templates — they reference tools by name and return a user message; they do not call the Bitbucket API themselves.
 
 ---
 

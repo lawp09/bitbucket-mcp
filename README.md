@@ -204,6 +204,19 @@ export BITBUCKET_TOOLS_CONFIG=/path/to/my-tools.json
 > get_pull_request_diff(repo_slug, pull_request_id, path="src/services/myService.ts")
 > ```
 
+## MCP Prompts
+
+The server also exposes **MCP Prompts** — parameterised templates that compatible clients (Claude Code, Cursor, ...) surface as slash commands. Instead of remembering tool names, you invoke a prompt and the assistant orchestrates the right tools for you. They appear in the client's prompt picker (`prompts/list`).
+
+| Prompt | Arguments | What it does |
+|--------|-----------|--------------|
+| `review_pull_request` | `repo_slug`, `pull_request_id` | Full AI review: metadata → diffstat → diff → comments → tasks, then Summary / Risk / Quality / Security / Recommendation |
+| `debug_pipeline_failure` | `repo_slug`, `pipeline_uuid` | Diagnose a failed pipeline: run → steps → failed-step logs, then Root cause / Failed step / Error / Fix |
+| `summarize_repository` | `repo_slug` | Repo overview: info → recent commits → open PRs → CI → issues, then Purpose / Activity / Health / Contributors |
+| `onboard_reviewer` | `repo_slug`, `pull_request_id` | Help a new reviewer: PR context → commits → diff → review history, then Context / Changes / Review-so-far / Focus |
+
+Prompts are enabled/disabled in `configs/tools.json` under the top-level `prompts` key (separate from `tools`).
+
 ## Credentials
 
 ### Option 1: `.env` file (recommended)

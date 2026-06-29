@@ -17,6 +17,8 @@ def test_load_default_config():
     assert result.get("merge_pull_request") is False
     # get_pull_request must be enabled
     assert result.get("get_pull_request") is True
+    # prompts (top-level "prompts" key) are read into the same map
+    assert result.get("review_pull_request") is True
 
 
 def test_load_config_from_param(tmp_path):
@@ -35,6 +37,27 @@ def test_load_config_from_param(tmp_path):
     result = load_tools_config(config_path=str(config_file))
 
     assert result == {"my_tool": True, "other_tool": False}
+
+
+def test_load_config_reads_prompts_key(tmp_path):
+    """The top-level "prompts" key feeds the same enabled map as "tools"."""
+    config = {
+        "tools": {"cat": {"my_tool": {"enabled": True}}},
+        "prompts": {
+            "review_pull_request": {"enabled": False},
+            "summarize_repository": {"enabled": True},
+        },
+    }
+    config_file = tmp_path / "p.json"
+    config_file.write_text(json.dumps(config))
+
+    result = load_tools_config(config_path=str(config_file))
+
+    assert result == {
+        "my_tool": True,
+        "review_pull_request": False,
+        "summarize_repository": True,
+    }
 
 
 def test_load_config_from_env_var(tmp_path):
