@@ -2919,3 +2919,293 @@ class BitbucketClient:
             f"/repositories/{ws}/{repo_slug}/deployments_config/environments/{environment_uuid}/variables/{variable_uuid}"
         )
         response.raise_for_status()
+
+    # ========== Branch Restrictions & Workspace Governance ==========
+    #
+    # API quirks verified against the docs (branch-restrictions / workspaces groups):
+    #   * The ``branch-restrictions`` COLLECTION endpoint requires a trailing slash
+    #     (404 otherwise, BCLOUD-17211); the individual ``/{id}`` resource does not.
+    #   * Workspace endpoints (``/workspaces/{ws}/members`` & ``/permissions``) are
+    #     standard — NO trailing slash.
+    #   * ``/members`` returns ``workspace_membership`` objects WITHOUT a ``permission``
+    #     field; per-user roles live on the separate ``/permissions`` endpoint.
+    #   * Member identifiers are an ``account_id`` or a brace-wrapped ``uuid`` (usernames
+    #     were removed from API URLs in 2019 for GDPR).
+
+    async def list_branch_restrictions(
+        self,
+        repo_slug: str,
+        kind: Optional[str] = None,
+        workspace: Optional[str] = None,
+        page_size: int = 30,
+        max_pages: Optional[int] = 1,
+    ) -> Dict[str, Any]:
+        """
+        List branch restrictions (branch protection rules) for a repository.
+
+        Note: the collection path requires a trailing slash (``/branch-restrictions/``).
+
+        Args:
+            repo_slug: Repository slug
+            kind: Optional filter by restriction type (e.g. ``push``,
+                ``require_approvals_to_merge``)
+            workspace: Workspace name (defaults to self.workspace)
+            page_size: Items per page (default: 30)
+            max_pages: Maximum pages to fetch (default: 1)
+
+        Returns:
+            Paginated list of branch restrictions
+        """
+        ws = workspace or self.workspace
+        config = PaginationConfig(page_size=page_size, max_pages=max_pages)
+        params = {"kind": kind} if kind else {}
+        return await aggregate_pages(
+            self.client,
+            f"/repositories/{ws}/{repo_slug}/branch-restrictions/",
+            params,
+            config,
+        )
+
+    async def get_branch_restriction(
+        self,
+        repo_slug: str,
+        restriction_id: int,
+        workspace: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Get a single branch restriction.
+
+        Args:
+            repo_slug: Repository slug
+            restriction_id: Numeric restriction id
+            workspace: Workspace name (defaults to self.workspace)
+
+        Returns:
+            Branch restriction object
+        """
+        ws = workspace or self.workspace
+        response = await self.client.get(
+            f"/repositories/{ws}/{repo_slug}/branch-restrictions/{restriction_id}"
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def create_branch_restriction(
+        self,
+        repo_slug: str,
+        kind: str,
+        pattern: str,
+        value: Optional[int] = None,
+        users: Optional[list] = None,
+        groups: Optional[list] = None,
+        workspace: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Create a branch restriction.
+
+        Args:
+            repo_slug: Repository slug
+            kind: Restriction type (``push``, ``force``, ``delete``,
+                ``require_approvals_to_merge``, ...)
+            pattern: Branch name pattern the restriction applies to
+            value: Numeric value where applicable (e.g. min approvals)
+            users: Optional list of account_ids exempted/targeted
+            groups: Optional list of group slugs exempted/targeted
+            workspace: Workspace name (defaults to self.workspace)
+
+        Returns:
+            Created branch restriction
+        """
+        ws = workspace or self.workspace
+        payload: Dict[str, Any] = {"kind": kind, "pattern": pattern}
+        if value is not None:
+            payload["value"] = value
+        if users is not None:
+            payload["users"] = [{"account_id": u} for u in users]
+        if groups is not None:
+            payload["groups"] = [{"slug": g} for g in groups]
+        response = await self.client.post(
+            f"/repositories/{ws}/{repo_slug}/branch-restrictions/",
+            json=payload,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def update_branch_restriction(
+        self,
+        repo_slug: str,
+        restriction_id: int,
+        kind: Optional[str] = None,
+        pattern: Optional[str] = None,
+        value: Optional[int] = None,
+        users: Optional[list] = None,
+        groups: Optional[list] = None,
+        workspace: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Update a branch restriction.
+
+        Note: the Bitbucket ``PUT`` endpoint requires ``kind`` in the body (it is the
+        restriction's identity and cannot be changed), so pass the existing ``kind``
+        along with the field(s) you want to change.
+
+        Args:
+            repo_slug: Repository slug
+            restriction_id: Numeric restriction id
+            kind: Restriction type — required by the API on update
+            pattern: New branch pattern (optional)
+            value: New numeric value (optional)
+            users: New list of account_ids (optional)
+            groups: New list of group slugs (optional)
+            workspace: Workspace name (defaults to self.workspace)
+
+        Returns:
+            Updated branch restriction
+        """
+        # The Bitbucket PUT endpoint rejects a body without ``kind`` (400). Fail fast
+        # with a clear message instead of letting a silent 400 bubble up.
+        if kind is None:
+            raise ValueError(
+                "update_branch_restriction requires 'kind' (the Bitbucket PUT API mandates it)."
+            )
+        ws = workspace or self.workspace
+        payload: Dict[str, Any] = {"kind": kind}
+        if pattern is not None:
+            payload["pattern"] = pattern
+        if value is not None:
+            payload["value"] = value
+        if users is not None:
+            payload["users"] = [{"account_id": u} for u in users]
+        if groups is not None:
+            payload["groups"] = [{"slug": g} for g in groups]
+        response = await self.client.put(
+            f"/repositories/{ws}/{repo_slug}/branch-restrictions/{restriction_id}",
+            json=payload,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def delete_branch_restriction(
+        self,
+        repo_slug: str,
+        restriction_id: int,
+        workspace: Optional[str] = None,
+    ) -> None:
+        """
+        Delete a branch restriction.
+
+        Args:
+            repo_slug: Repository slug
+            restriction_id: Numeric restriction id
+            workspace: Workspace name (defaults to self.workspace)
+        """
+        ws = workspace or self.workspace
+        response = await self.client.delete(
+            f"/repositories/{ws}/{repo_slug}/branch-restrictions/{restriction_id}"
+        )
+        response.raise_for_status()
+
+    async def list_workspace_members(
+        self,
+        workspace: Optional[str] = None,
+        page_size: int = 30,
+        max_pages: Optional[int] = 1,
+    ) -> Dict[str, Any]:
+        """
+        List the members of a workspace.
+
+        The members endpoint returns ``workspace_membership`` objects (user + workspace)
+        WITHOUT a per-user permission; use ``list_workspace_permissions`` for roles.
+
+        Args:
+            workspace: Workspace name (defaults to self.workspace)
+            page_size: Items per page (default: 30)
+            max_pages: Maximum pages to fetch (default: 1)
+
+        Returns:
+            Paginated list of workspace memberships
+        """
+        ws = workspace or self.workspace
+        config = PaginationConfig(page_size=page_size, max_pages=max_pages)
+        return await aggregate_pages(
+            self.client,
+            f"/workspaces/{ws}/members",
+            {},
+            config,
+        )
+
+    async def get_workspace_member(
+        self,
+        member_id: str,
+        workspace: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Get a single workspace member.
+
+        Args:
+            member_id: Member account_id or brace-wrapped uuid (not a username)
+            workspace: Workspace name (defaults to self.workspace)
+
+        Returns:
+            Workspace membership object
+        """
+        ws = workspace or self.workspace
+        response = await self.client.get(
+            f"/workspaces/{ws}/members/{member_id}"
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def list_workspace_permissions(
+        self,
+        workspace: Optional[str] = None,
+        page_size: int = 30,
+        max_pages: Optional[int] = 1,
+    ) -> Dict[str, Any]:
+        """
+        List the user permissions (roles) of a workspace.
+
+        Args:
+            workspace: Workspace name (defaults to self.workspace)
+            page_size: Items per page (default: 30)
+            max_pages: Maximum pages to fetch (default: 1)
+
+        Returns:
+            Paginated list of workspace permissions (permission + user)
+        """
+        ws = workspace or self.workspace
+        config = PaginationConfig(page_size=page_size, max_pages=max_pages)
+        return await aggregate_pages(
+            self.client,
+            f"/workspaces/{ws}/permissions",
+            {},
+            config,
+        )
+
+    async def list_repository_permissions(
+        self,
+        repo_slug: str,
+        workspace: Optional[str] = None,
+        page_size: int = 30,
+        max_pages: Optional[int] = 1,
+    ) -> Dict[str, Any]:
+        """
+        List the user permissions for a specific repository in the workspace.
+
+        Args:
+            repo_slug: Repository slug
+            workspace: Workspace name (defaults to self.workspace)
+            page_size: Items per page (default: 30)
+            max_pages: Maximum pages to fetch (default: 1)
+
+        Returns:
+            Paginated list of repository permissions (permission + user)
+        """
+        ws = workspace or self.workspace
+        config = PaginationConfig(page_size=page_size, max_pages=max_pages)
+        return await aggregate_pages(
+            self.client,
+            f"/workspaces/{ws}/permissions/repositories/{repo_slug}",
+            {},
+            config,
+        )

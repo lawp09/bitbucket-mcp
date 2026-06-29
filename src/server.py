@@ -36,6 +36,10 @@ from .utils.transformers import (
     slim_environment, slim_environment_list,
     slim_deployment, slim_deployment_list,
     slim_deployment_variable, slim_deployment_variable_list,
+    slim_branch_restriction, slim_branch_restriction_list,
+    slim_workspace_membership, slim_workspace_membership_list,
+    slim_workspace_permission_list,
+    slim_repository_permission_list,
 )
 
 # Configuration logging vers stderr uniquement (container-friendly)
@@ -2989,3 +2993,251 @@ async def delete_deployment_variable(
         repo_slug, environment_uuid, variable_uuid, workspace
     )
     return {"deleted": True, "variable_uuid": variable_uuid}
+
+
+# ========== Branch Restrictions Tools ==========
+
+@conditional_tool()
+async def list_branch_restrictions(
+    repo_slug: str,
+    kind: Optional[str] = None,
+    workspace: Optional[str] = None,
+    page_size: int = 30,
+    max_pages: Optional[int] = 1
+) -> Dict[str, Any]:
+    """
+    List branch restrictions (branch protection rules) for a repository.
+
+    Requires the `repository` scope (or `repository:admin` depending on the repo
+    configuration).
+
+    Args:
+        repo_slug: Repository slug
+        kind: Optional filter by restriction type (e.g. `push`, `require_approvals_to_merge`)
+        workspace: Workspace name (optional, defaults to configured workspace)
+        page_size: Items per page (default: 30)
+        max_pages: Maximum pages to fetch (default: 1, max recommended: 10)
+
+    Returns:
+        Paginated list of branch restrictions
+    """
+    client = get_client()
+    result = await client.list_branch_restrictions(repo_slug, kind, workspace, page_size, max_pages)
+    return slim_branch_restriction_list(result)
+
+
+@conditional_tool()
+async def get_branch_restriction(
+    repo_slug: str,
+    restriction_id: int,
+    workspace: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Get a single branch restriction.
+
+    Args:
+        repo_slug: Repository slug
+        restriction_id: Numeric restriction id
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Branch restriction details
+    """
+    client = get_client()
+    result = await client.get_branch_restriction(repo_slug, restriction_id, workspace)
+    return slim_branch_restriction(result)
+
+
+@conditional_tool()
+async def create_branch_restriction(
+    repo_slug: str,
+    kind: str,
+    pattern: str,
+    value: Optional[int] = None,
+    users: Optional[list] = None,
+    groups: Optional[list] = None,
+    workspace: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Create a branch restriction (branch protection rule).
+
+    Requires the `repository:admin` scope.
+
+    Args:
+        repo_slug: Repository slug
+        kind: Restriction type (`push`, `force`, `delete`, `require_approvals_to_merge`, ...)
+        pattern: Branch name pattern the restriction applies to
+        value: Numeric value where applicable (e.g. minimum approvals)
+        users: Optional list of account_ids
+        groups: Optional list of group slugs
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Created branch restriction
+    """
+    client = get_client()
+    result = await client.create_branch_restriction(
+        repo_slug, kind, pattern, value, users, groups, workspace
+    )
+    return slim_branch_restriction(result)
+
+
+@conditional_tool()
+async def update_branch_restriction(
+    repo_slug: str,
+    restriction_id: int,
+    kind: Optional[str] = None,
+    pattern: Optional[str] = None,
+    value: Optional[int] = None,
+    users: Optional[list] = None,
+    groups: Optional[list] = None,
+    workspace: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Update a branch restriction.
+
+    The Bitbucket PUT endpoint requires `kind` in the body (it identifies the
+    restriction), so pass the existing `kind` along with the field(s) to change.
+    Requires the `repository:admin` scope.
+
+    Args:
+        repo_slug: Repository slug
+        restriction_id: Numeric restriction id
+        kind: Restriction type — required by the API on update
+        pattern: New branch pattern (optional)
+        value: New numeric value (optional)
+        users: New list of account_ids (optional)
+        groups: New list of group slugs (optional)
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Updated branch restriction
+    """
+    client = get_client()
+    result = await client.update_branch_restriction(
+        repo_slug, restriction_id, kind, pattern, value, users, groups, workspace
+    )
+    return slim_branch_restriction(result)
+
+
+@conditional_tool()
+async def delete_branch_restriction(
+    repo_slug: str,
+    restriction_id: int,
+    workspace: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Delete a branch restriction.
+
+    Requires the `repository:admin` scope.
+
+    Args:
+        repo_slug: Repository slug
+        restriction_id: Numeric restriction id
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Confirmation {"deleted": True, "restriction_id": ...}
+    """
+    client = get_client()
+    await client.delete_branch_restriction(repo_slug, restriction_id, workspace)
+    return {"deleted": True, "restriction_id": restriction_id}
+
+
+# ========== Workspace Members & Permissions Tools ==========
+
+@conditional_tool()
+async def list_workspace_members(
+    workspace: Optional[str] = None,
+    page_size: int = 30,
+    max_pages: Optional[int] = 1
+) -> Dict[str, Any]:
+    """
+    List the members of a workspace.
+
+    The members endpoint carries no per-user permission — use
+    `list_workspace_permissions` for roles. Requires the `account` scope.
+
+    Args:
+        workspace: Workspace name (optional, defaults to configured workspace)
+        page_size: Items per page (default: 30)
+        max_pages: Maximum pages to fetch (default: 1, max recommended: 10)
+
+    Returns:
+        Paginated list of workspace memberships
+    """
+    client = get_client()
+    result = await client.list_workspace_members(workspace, page_size, max_pages)
+    return slim_workspace_membership_list(result)
+
+
+@conditional_tool()
+async def get_workspace_member(
+    member_id: str,
+    workspace: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Get a single workspace member.
+
+    Requires the `account` scope.
+
+    Args:
+        member_id: Member account_id or brace-wrapped uuid (not a username)
+        workspace: Workspace name (optional, defaults to configured workspace)
+
+    Returns:
+        Workspace membership details
+    """
+    client = get_client()
+    result = await client.get_workspace_member(member_id, workspace)
+    return slim_workspace_membership(result)
+
+
+@conditional_tool()
+async def list_workspace_permissions(
+    workspace: Optional[str] = None,
+    page_size: int = 30,
+    max_pages: Optional[int] = 1
+) -> Dict[str, Any]:
+    """
+    List the user permissions (roles) of a workspace.
+
+    Requires the `account` scope.
+
+    Args:
+        workspace: Workspace name (optional, defaults to configured workspace)
+        page_size: Items per page (default: 30)
+        max_pages: Maximum pages to fetch (default: 1, max recommended: 10)
+
+    Returns:
+        Paginated list of workspace permissions (permission + user)
+    """
+    client = get_client()
+    result = await client.list_workspace_permissions(workspace, page_size, max_pages)
+    return slim_workspace_permission_list(result)
+
+
+@conditional_tool()
+async def list_repository_permissions(
+    repo_slug: str,
+    workspace: Optional[str] = None,
+    page_size: int = 30,
+    max_pages: Optional[int] = 1
+) -> Dict[str, Any]:
+    """
+    List the user permissions for a specific repository in the workspace.
+
+    Requires the `account` scope.
+
+    Args:
+        repo_slug: Repository slug
+        workspace: Workspace name (optional, defaults to configured workspace)
+        page_size: Items per page (default: 30)
+        max_pages: Maximum pages to fetch (default: 1, max recommended: 10)
+
+    Returns:
+        Paginated list of repository permissions (permission + user)
+    """
+    client = get_client()
+    result = await client.list_repository_permissions(repo_slug, workspace, page_size, max_pages)
+    return slim_repository_permission_list(result)

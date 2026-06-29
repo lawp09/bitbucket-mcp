@@ -691,3 +691,91 @@ def slim_deployment_variable(variable: Dict[str, Any]) -> Dict[str, Any]:
 def slim_deployment_variable_list(data: Dict[str, Any]) -> Dict[str, Any]:
     """Slim a paginated list of deployment variables."""
     return _slim_paginated(data, slim_deployment_variable)
+
+
+# ========== Branch Restrictions & Workspace Governance ==========
+
+def _slim_workspace_user(user: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Extract identity fields for governance APIs.
+
+    Unlike ``_slim_user`` (which keeps the deprecated ``username``), this keeps the
+    GDPR-era identifiers ``account_id`` and ``uuid`` — the only values accepted by
+    ``get_workspace_member`` and by branch-restriction user payloads.
+    """
+    if not user:
+        return None
+    return {
+        "account_id": user.get("account_id"),
+        "display_name": user.get("display_name"),
+        "nickname": user.get("nickname"),
+        "uuid": user.get("uuid"),
+    }
+
+
+def slim_branch_restriction(restriction: Dict[str, Any]) -> Dict[str, Any]:
+    """Slim a single branch restriction (branch protection rule)."""
+    return {
+        "id": restriction.get("id"),
+        "kind": restriction.get("kind"),
+        "pattern": restriction.get("pattern"),
+        "branch_match_kind": restriction.get("branch_match_kind"),
+        "branch_type": restriction.get("branch_type"),
+        "value": restriction.get("value"),
+        "users": [
+            u.get("account_id") or u.get("display_name")
+            for u in restriction.get("users") or []
+        ],
+        "groups": [
+            g.get("slug") or g.get("name")
+            for g in restriction.get("groups") or []
+        ],
+    }
+
+
+def slim_branch_restriction_list(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Slim a paginated list of branch restrictions."""
+    return _slim_paginated(data, slim_branch_restriction)
+
+
+def slim_workspace_membership(member: Dict[str, Any]) -> Dict[str, Any]:
+    """Slim a workspace membership (``/members``).
+
+    The members endpoint carries no per-user permission — that lives on
+    ``/permissions`` (see ``slim_workspace_permission``).
+    """
+    return {
+        "user": _slim_workspace_user(member.get("user")),
+    }
+
+
+def slim_workspace_membership_list(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Slim a paginated list of workspace memberships."""
+    return _slim_paginated(data, slim_workspace_membership)
+
+
+def slim_workspace_permission(perm: Dict[str, Any]) -> Dict[str, Any]:
+    """Slim a workspace permission entry (``/permissions``: permission + user)."""
+    return {
+        "permission": perm.get("permission"),
+        "user": _slim_workspace_user(perm.get("user")),
+    }
+
+
+def slim_workspace_permission_list(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Slim a paginated list of workspace permissions."""
+    return _slim_paginated(data, slim_workspace_permission)
+
+
+def slim_repository_permission(perm: Dict[str, Any]) -> Dict[str, Any]:
+    """Slim a repository permission entry (permission + user + repository)."""
+    repository = perm.get("repository") or {}
+    return {
+        "permission": perm.get("permission"),
+        "user": _slim_workspace_user(perm.get("user")),
+        "repository": repository.get("full_name") or repository.get("name"),
+    }
+
+
+def slim_repository_permission_list(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Slim a paginated list of repository permissions."""
+    return _slim_paginated(data, slim_repository_permission)
