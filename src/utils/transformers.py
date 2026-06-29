@@ -617,3 +617,77 @@ def slim_issue_comment(comment: Dict[str, Any]) -> Dict[str, Any]:
 def slim_issue_comment_list(data: Dict[str, Any]) -> Dict[str, Any]:
     """Slim a paginated list of issue comments."""
     return _slim_paginated(data, slim_issue_comment)
+
+
+# ========== Deployments & Environments ==========
+
+def slim_environment(env: Dict[str, Any]) -> Dict[str, Any]:
+    """Slim a single deployment environment."""
+    env_type = env.get("environment_type") or {}
+    return {
+        "uuid": env.get("uuid"),
+        "name": env.get("name"),
+        "environment_type": env_type.get("name"),
+        "slug": env.get("slug"),
+        "rank": env.get("rank"),
+        "hidden": env.get("hidden", False),
+    }
+
+
+def slim_environment_list(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Slim a paginated list of environments."""
+    return _slim_paginated(data, slim_environment)
+
+
+def slim_deployment(dep: Dict[str, Any]) -> Dict[str, Any]:
+    """Slim a single deployment.
+
+    State model: ``state.name`` is the lifecycle phase (PENDING / IN_PROGRESS /
+    COMPLETED / UNDEPLOYED) and ``state.status.name`` is the COMPLETED sub-result
+    (SUCCESSFUL / FAILED / STOPPED). The sub-status is null while a deployment is
+    still running, so the ``or {}`` guard is required. The deployed commit lives
+    under ``deployable.commit.hash`` (canonical); ``release.commit`` / top-level
+    ``commit`` are tolerated as fallbacks.
+    """
+    state = dep.get("state") or {}
+    environment = dep.get("environment") or {}
+    deployable = dep.get("deployable") or {}
+    release = dep.get("release") or {}
+    commit = deployable.get("commit") or release.get("commit") or dep.get("commit") or {}
+    return {
+        "uuid": dep.get("uuid"),
+        "state": state.get("name"),
+        "status": (state.get("status") or {}).get("name"),
+        "environment": environment.get("name"),
+        "environment_uuid": environment.get("uuid"),
+        "commit": (commit.get("hash") or "")[:12] or None,
+        "release_name": release.get("name"),
+        "created_on": dep.get("created_on"),
+        "last_update_time": dep.get("last_update_time"),
+    }
+
+
+def slim_deployment_list(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Slim a paginated list of deployments."""
+    return _slim_paginated(data, slim_deployment)
+
+
+def slim_deployment_variable(variable: Dict[str, Any]) -> Dict[str, Any]:
+    """Slim a deployment environment variable.
+
+    Secured variables never expose their value (the API omits it); force ``value``
+    to None whenever ``secured`` is True so a secret is never surfaced even if the
+    field leaks. Mirrors ``slim_pipeline_variable``.
+    """
+    secured = variable.get("secured") is True
+    return {
+        "uuid": variable.get("uuid"),
+        "key": variable.get("key"),
+        "value": None if secured else variable.get("value"),
+        "secured": secured,
+    }
+
+
+def slim_deployment_variable_list(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Slim a paginated list of deployment variables."""
+    return _slim_paginated(data, slim_deployment_variable)

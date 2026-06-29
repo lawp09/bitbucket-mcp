@@ -43,17 +43,22 @@ _CLASSIFICATION_CASES = [
     ("get_repository_tags", (True, False, True)),
     ("list_pipeline_runs", (True, False, True)),
     ("get_file_content", (True, False, True)),
+    ("list_environments", (True, False, True)),
+    ("get_deployment", (True, False, True)),
     # create_/add_ → write, non-idempotent
     ("create_pull_request", (False, False, False)),
     ("add_pull_request_comment", (False, False, False)),
     ("create_issue", (False, False, False)),
+    ("create_environment", (False, False, False)),         # disabled by default
     # update_ → write, idempotent
     ("update_pull_request", (False, False, True)),
     ("update_issue_comment", (False, False, True)),
+    ("update_deployment_variable", (False, False, True)),  # disabled by default
     # delete_ → destructive, idempotent
     ("delete_pull_request_comment", (False, True, True)),
     ("delete_issue", (False, True, True)),            # disabled by default
     ("delete_pipeline_cache", (False, True, True)),   # disabled by default
+    ("delete_environment", (False, True, True)),      # disabled by default
     # read-only despite write-sounding verb
     ("suggest_pull_request_reviewers", (True, False, True)),
     # update-like toggles → write, idempotent

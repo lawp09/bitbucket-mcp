@@ -2618,3 +2618,304 @@ class BitbucketClient:
         return await aggregate_pages(
             self.client, url, {}, config, follow_redirects=True
         )
+
+    # ========== Deployments & Environments ==========
+    #
+    # API quirks verified against the docs (developer.atlassian.com deployments group):
+    #   * The runtime collection endpoints REQUIRE a trailing slash:
+    #     ``/environments/`` returns 404 without it (BitbucketPHP/Client#65). The same
+    #     trailing slash is applied to ``/deployments/`` for consistency within the group.
+    #   * The deployment-variables endpoints live under ``deployments_config`` (UNDERSCORE),
+    #     mirroring ``pipelines_config`` for variables (NOT the hyphenated caches path).
+    #   * There is no ``PUT /environments/{uuid}`` (modification is only possible via
+    #     ``POST .../changes``), so no ``update_environment`` is exposed.
+    #   * ``/deployments`` cannot be server-side filtered by environment (BCLOUD-18729);
+    #     consumers filter on the slimmed ``environment`` field instead.
+
+    async def list_environments(
+        self,
+        repo_slug: str,
+        workspace: Optional[str] = None,
+        page_size: int = 20,
+        max_pages: Optional[int] = 1,
+    ) -> Dict[str, Any]:
+        """
+        List deployment environments for a repository.
+
+        Note: the collection path requires a trailing slash (``/environments/``);
+        without it the API returns 404.
+
+        Args:
+            repo_slug: Repository slug
+            workspace: Workspace name (defaults to self.workspace)
+            page_size: Items per page (default: 20)
+            max_pages: Maximum pages to fetch (default: 1)
+
+        Returns:
+            Paginated list of environments
+        """
+        ws = workspace or self.workspace
+        config = PaginationConfig(page_size=page_size, max_pages=max_pages)
+        return await aggregate_pages(
+            self.client,
+            f"/repositories/{ws}/{repo_slug}/environments/",
+            {},
+            config,
+        )
+
+    async def get_environment(
+        self,
+        repo_slug: str,
+        environment_uuid: str,
+        workspace: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Get a single deployment environment.
+
+        Args:
+            repo_slug: Repository slug
+            environment_uuid: Environment UUID
+            workspace: Workspace name (defaults to self.workspace)
+
+        Returns:
+            Environment object
+        """
+        ws = workspace or self.workspace
+        response = await self.client.get(
+            f"/repositories/{ws}/{repo_slug}/environments/{environment_uuid}"
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def create_environment(
+        self,
+        repo_slug: str,
+        name: str,
+        environment_type: str = "Test",
+        workspace: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Create a deployment environment.
+
+        Args:
+            repo_slug: Repository slug
+            name: Environment name
+            environment_type: One of "Test", "Staging", "Production" (default: "Test")
+            workspace: Workspace name (defaults to self.workspace)
+
+        Returns:
+            Created environment
+        """
+        ws = workspace or self.workspace
+        payload = {"name": name, "environment_type": {"name": environment_type}}
+        response = await self.client.post(
+            f"/repositories/{ws}/{repo_slug}/environments/",
+            json=payload,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def delete_environment(
+        self,
+        repo_slug: str,
+        environment_uuid: str,
+        workspace: Optional[str] = None,
+    ) -> None:
+        """
+        Delete a deployment environment.
+
+        Args:
+            repo_slug: Repository slug
+            environment_uuid: Environment UUID
+            workspace: Workspace name (defaults to self.workspace)
+        """
+        ws = workspace or self.workspace
+        response = await self.client.delete(
+            f"/repositories/{ws}/{repo_slug}/environments/{environment_uuid}"
+        )
+        response.raise_for_status()
+
+    async def list_deployments(
+        self,
+        repo_slug: str,
+        workspace: Optional[str] = None,
+        page_size: int = 20,
+        max_pages: Optional[int] = 1,
+    ) -> Dict[str, Any]:
+        """
+        List deployments for a repository (most recent first).
+
+        The API does not support server-side filtering by environment
+        (BCLOUD-18729); filter on the ``environment`` field of the result instead.
+
+        Args:
+            repo_slug: Repository slug
+            workspace: Workspace name (defaults to self.workspace)
+            page_size: Items per page (default: 20)
+            max_pages: Maximum pages to fetch (default: 1)
+
+        Returns:
+            Paginated list of deployments
+        """
+        ws = workspace or self.workspace
+        config = PaginationConfig(page_size=page_size, max_pages=max_pages)
+        return await aggregate_pages(
+            self.client,
+            f"/repositories/{ws}/{repo_slug}/deployments/",
+            {},
+            config,
+        )
+
+    async def get_deployment(
+        self,
+        repo_slug: str,
+        deployment_uuid: str,
+        workspace: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Get a single deployment (state, environment, deployed commit).
+
+        Args:
+            repo_slug: Repository slug
+            deployment_uuid: Deployment UUID
+            workspace: Workspace name (defaults to self.workspace)
+
+        Returns:
+            Deployment object
+        """
+        ws = workspace or self.workspace
+        response = await self.client.get(
+            f"/repositories/{ws}/{repo_slug}/deployments/{deployment_uuid}"
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def list_deployment_variables(
+        self,
+        repo_slug: str,
+        environment_uuid: str,
+        workspace: Optional[str] = None,
+        page_size: int = 20,
+        max_pages: Optional[int] = 1,
+    ) -> Dict[str, Any]:
+        """
+        List the variables of a deployment environment (secured values masked).
+
+        Path note: uses ``deployments_config`` (underscore), like pipeline variables.
+
+        Args:
+            repo_slug: Repository slug
+            environment_uuid: Environment UUID
+            workspace: Workspace name (defaults to self.workspace)
+            page_size: Items per page (default: 20)
+            max_pages: Maximum pages to fetch (default: 1)
+
+        Returns:
+            Paginated list of deployment variables
+        """
+        ws = workspace or self.workspace
+        config = PaginationConfig(page_size=page_size, max_pages=max_pages)
+        return await aggregate_pages(
+            self.client,
+            f"/repositories/{ws}/{repo_slug}/deployments_config/environments/{environment_uuid}/variables",
+            {},
+            config,
+        )
+
+    async def create_deployment_variable(
+        self,
+        repo_slug: str,
+        environment_uuid: str,
+        key: str,
+        value: str,
+        secured: bool = False,
+        workspace: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Create a deployment environment variable.
+
+        Args:
+            repo_slug: Repository slug
+            environment_uuid: Environment UUID
+            key: Variable name
+            value: Variable value
+            secured: Whether the value is secured/masked (default: False)
+            workspace: Workspace name (defaults to self.workspace)
+
+        Returns:
+            Created variable (no value if secured)
+        """
+        ws = workspace or self.workspace
+        payload = {"key": key, "value": value, "secured": secured}
+        response = await self.client.post(
+            f"/repositories/{ws}/{repo_slug}/deployments_config/environments/{environment_uuid}/variables",
+            json=payload,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def update_deployment_variable(
+        self,
+        repo_slug: str,
+        environment_uuid: str,
+        variable_uuid: str,
+        key: Optional[str] = None,
+        value: Optional[str] = None,
+        secured: Optional[bool] = None,
+        workspace: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Update a deployment environment variable (partial update).
+
+        Args:
+            repo_slug: Repository slug
+            environment_uuid: Environment UUID
+            variable_uuid: Variable UUID
+            key: New variable name (optional)
+            value: New variable value (optional)
+            secured: New secured flag (optional)
+            workspace: Workspace name (defaults to self.workspace)
+
+        Returns:
+            Updated variable (no value if secured)
+        """
+        ws = workspace or self.workspace
+        payload: Dict[str, Any] = {}
+        if key is not None:
+            payload["key"] = key
+        if value is not None:
+            payload["value"] = value
+        if secured is not None:
+            payload["secured"] = secured
+        if not payload:
+            raise ValueError(
+                "update_deployment_variable requires at least one of key/value/secured."
+            )
+        response = await self.client.put(
+            f"/repositories/{ws}/{repo_slug}/deployments_config/environments/{environment_uuid}/variables/{variable_uuid}",
+            json=payload,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def delete_deployment_variable(
+        self,
+        repo_slug: str,
+        environment_uuid: str,
+        variable_uuid: str,
+        workspace: Optional[str] = None,
+    ) -> None:
+        """
+        Delete a deployment environment variable.
+
+        Args:
+            repo_slug: Repository slug
+            environment_uuid: Environment UUID
+            variable_uuid: Variable UUID
+            workspace: Workspace name (defaults to self.workspace)
+        """
+        ws = workspace or self.workspace
+        response = await self.client.delete(
+            f"/repositories/{ws}/{repo_slug}/deployments_config/environments/{environment_uuid}/variables/{variable_uuid}"
+        )
+        response.raise_for_status()
