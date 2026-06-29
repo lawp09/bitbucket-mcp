@@ -3,7 +3,6 @@
 import json
 import os
 import pytest
-from pathlib import Path
 from unittest.mock import patch
 
 from src.server import load_tools_config
@@ -93,15 +92,12 @@ def test_env_var_invalid_json_raises(tmp_path):
 
 def test_default_missing_returns_empty(tmp_path):
     """When the default path is missing, return {} without raising an exception."""
-    fake_default = str(tmp_path / "missing_default.json")
-
     # Patch os.getenv so BITBUCKET_TOOLS_CONFIG is absent, and override the
     # default path by pointing __file__'s parent to a location with no tools.json.
     with patch.dict(os.environ, {}, clear=True):
         # Override the default path computation by patching Path inside server module.
         # We simulate "default file not found" by using a non-existent path as default.
         import src.server as server_module
-        original_file = server_module.__file__
 
         # Temporarily relocate __file__ so project_root / configs / tools.json doesn't exist
         with patch.object(server_module, "__file__", str(tmp_path / "src" / "server.py")):
