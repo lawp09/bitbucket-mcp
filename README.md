@@ -255,6 +255,17 @@ Then configure your AI assistant to use `docker exec`:
 }
 ```
 
+### Transports
+
+The server speaks **stdio** by default (the standard transport for local MCP clients). For a network deployment it also supports **Streamable HTTP** (MCP spec 2025-03-26):
+
+```bash
+# Streamable HTTP on 0.0.0.0:8080
+python -m src.main --transport http --host 0.0.0.0 --port 8080
+```
+
+> `--transport sse` (legacy Server-Sent Events) is still accepted but **deprecated** — it emits a `DeprecationWarning`. Prefer `--transport http`.
+
 ## Development
 
 ```bash
