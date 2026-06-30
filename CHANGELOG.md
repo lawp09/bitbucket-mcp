@@ -10,6 +10,7 @@
 
 ### Notes
 - `main()` now accepts an optional `argv` (defaults to `sys.argv`) for testability. Transport selection is unit-tested with `mcp.run` mocked; a real HTTP round-trip remains FastMCP's responsibility (validate manually with `python -m src.main --transport http`).
+- README documents the Streamable HTTP endpoint path: clients connect to `http://<host>:<port>/mcp`.
 
 ---
 

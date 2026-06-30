@@ -264,6 +264,8 @@ The server speaks **stdio** by default (the standard transport for local MCP cli
 python -m src.main --transport http --host 0.0.0.0 --port 8080
 ```
 
+> Clients connect to `http://<host>:<port>/mcp` (e.g. `http://localhost:8080/mcp`).
+
 > `--transport sse` (legacy Server-Sent Events) is still accepted but **deprecated** — it emits a `DeprecationWarning`. Prefer `--transport http`.
 
 ## Development
