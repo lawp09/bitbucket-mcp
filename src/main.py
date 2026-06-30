@@ -3,11 +3,17 @@
 
 import argparse
 import sys
+import warnings
 from .server import mcp
 
 
-def main():
-    """Main entry point with CLI argument parsing"""
+def main(argv=None):
+    """Main entry point with CLI argument parsing.
+
+    Args:
+        argv: Optional list of CLI args (defaults to sys.argv[1:] when None).
+              Exposed for testability — the packaged entry point calls main().
+    """
     parser = argparse.ArgumentParser(
         description="Bitbucket MCP Server - Container optimized",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -16,7 +22,7 @@ Examples:
   # Run with stdio transport (default for MCP)
   python -m src.main --transport stdio --loggers stderr
 
-  # Run with HTTP transport on port 8080
+  # Run with Streamable HTTP transport on port 8080
   python -m src.main --transport http --port 8080
 
 Environment variables required:
@@ -28,9 +34,13 @@ Environment variables required:
 
     parser.add_argument(
         "--transport",
-        choices=["stdio", "http"],
+        choices=["stdio", "http", "sse"],
         default="stdio",
-        help="Transport type (default: stdio)"
+        help=(
+            "Transport protocol (default: stdio). 'stdio' for local clients; "
+            "'http' uses Streamable HTTP (MCP spec 2025-03-26); "
+            "'sse' is the legacy Server-Sent Events transport (deprecated)."
+        )
     )
 
     parser.add_argument(
@@ -54,7 +64,7 @@ Environment variables required:
         help="Host for HTTP transport (default: 0.0.0.0)"
     )
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     # Validate credentials (env vars → keychain fallback)
     from .utils.credentials import get_credentials
@@ -64,16 +74,40 @@ Environment variables required:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
-    try:
-        print(f"Starting Bitbucket MCP Server with {args.transport} transport...", file=sys.stderr)
+    # Map the CLI choice to the FastMCP transport name once, so every log message
+    # uses the real transport ('http' -> 'streamable-http'; 'sse' -> legacy alias).
+    transport = {
+        "stdio": "stdio",
+        "http": "streamable-http",
+        "sse": "sse",
+    }[args.transport]
 
-        if args.transport == "stdio":
+    # Emit the deprecation warning OUTSIDE the try/except below: DeprecationWarning is
+    # an Exception subclass, so under PYTHONWARNINGS=error it would be caught by the
+    # generic `except Exception` and reported as a misleading "Error starting server".
+    if args.transport == "sse":
+        warnings.warn(
+            "Transport 'sse' is deprecated (MCP spec 2025-03-26); "
+            "use '--transport http' (Streamable HTTP) instead.",
+            DeprecationWarning,
+        )
+
+    try:
+        print(f"Starting Bitbucket MCP Server ({transport} transport)...", file=sys.stderr)
+
+        if transport == "stdio":
             # Run with stdio transport (standard MCP)
             mcp.run(transport="stdio")
         else:
-            # Run with HTTP transport
-            print(f"Server running on http://{args.host}:{args.port}", file=sys.stderr)
-            mcp.run(transport="sse", host=args.host, port=args.port)
+            # FastMCP.run() does not accept host/port kwargs — they are configured
+            # on the server settings before run() is called.
+            mcp.settings.host = args.host
+            mcp.settings.port = args.port
+            print(
+                f"Server running on http://{args.host}:{args.port} ({transport})",
+                file=sys.stderr,
+            )
+            mcp.run(transport=transport)
 
     except KeyboardInterrupt:
         print("\nServer stopped by user", file=sys.stderr)

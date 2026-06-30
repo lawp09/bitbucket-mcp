@@ -1,5 +1,19 @@
 # Changelog - Bitbucket MCP Server Python
 
+## [1.23.0] - 2026-06-29
+
+### Changed
+- HTTP transport migrated from the deprecated **SSE** transport to **Streamable HTTP** (MCP spec 2025-03-26). `--transport http` now selects `streamable-http`; `--transport sse` is kept as a legacy alias that emits a `DeprecationWarning`. `--transport stdio` (the default) is unchanged.
+
+### Fixed
+- HTTP transport never actually started: `mcp.run()` was being called with `host`/`port` keyword arguments that `FastMCP.run()` does not accept (`TypeError`). Host/port are now set on `mcp.settings` before `run()`, so the HTTP server starts correctly.
+
+### Notes
+- `main()` now accepts an optional `argv` (defaults to `sys.argv`) for testability. Transport selection is unit-tested with `mcp.run` mocked; a real HTTP round-trip remains FastMCP's responsibility (validate manually with `python -m src.main --transport http`).
+- README documents the Streamable HTTP endpoint path: clients connect to `http://<host>:<port>/mcp`.
+
+---
+
 ## [1.22.0] - 2026-06-29
 
 ### Added

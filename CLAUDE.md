@@ -4,7 +4,7 @@
 
 **Name**: bitbucket-mcp-py
 **Type**: MCP (Model Context Protocol) Server for Bitbucket API
-**Version**: 1.22.0
+**Version**: 1.23.0
 **Python**: 3.12+
 **Container Runtime**: Podman (preferred) or Docker
 
@@ -291,6 +291,8 @@ mcp-publisher publish server.json
 Then: `git tag vX.Y.Z && git push origin vX.Y.Z` → GitHub Actions handles the rest.
 
 ## Recent Changes
+
+- Migrated the HTTP transport from the deprecated **SSE** to **Streamable HTTP** (MCP spec 2025-03-26). `src/main.py`: `--transport http` → `streamable-http`; `--transport sse` kept as a legacy alias emitting a `DeprecationWarning` (out of the `try/except` so warnings-as-errors doesn't mask it as a server crash); `stdio` (default) unchanged. **Also fixed a latent bug**: `mcp.run()` was called with `host`/`port` kwargs that `FastMCP.run(transport, mount_path)` does not accept (`TypeError`) — HTTP never started; host/port are now set on `mcp.settings` before `run()`. `main(argv=None)` is now testable (`parse_args(argv)`); new `tests/test_main.py` mocks `mcp.run` + patches `src.utils.credentials.get_credentials` (imported inside `main()`), with an autouse fixture restoring `mcp.settings`. Transport selection is unit-tested; a real HTTP round-trip stays FastMCP's responsibility (v1.23.0, #62)
 
 - Added Branch Restrictions & Workspace governance tools — 9 tools (`list_branch_restrictions`, `get_branch_restriction` enabled + `create/update/delete_branch_restriction` disabled; `list_workspace_members`, `get_workspace_member`, `list_workspace_permissions`, `list_repository_permissions` enabled — **first `/workspaces/` workspace-level endpoints**). Slim responses `slim_branch_restriction`/`slim_workspace_membership`/`slim_workspace_permission`/`slim_repository_permission`. **API gotchas (verified via docs/community)**: `branch-restrictions` collection REQUIRES a trailing slash (404 otherwise, BCLOUD-17211) while `/{id}` does not; workspace endpoints are standard (no trailing slash); **`/members` returns `workspace_membership` WITHOUT a `permission` field** (roles live on `/permissions`) → distinct transformers; user ids are `account_id`/`uuid` (GDPR 2019, usernames removed) via a dedicated `_slim_workspace_user`; the `PUT` update requires `kind` in the body. Read tools need `repository`/`account` scopes, write tools `repository:admin` (v1.22.0, #63)
 - Added MCP Prompts primitive — 4 slash-command templates (`review_pull_request`, `debug_pipeline_failure`, `summarize_repository`, `onboard_reviewer`) that orchestrate existing tools and ask for structured output. New `src/prompts.py` (pure template builders, unit-testable without FastMCP) + `conditional_prompt()` decorator mirroring `conditional_tool`. **Config**: prompts live under a NEW top-level `prompts` key in `configs/tools.json` (NOT under `tools`) so they share `is_tool_enabled` without polluting `_all_tool_names()` / the annotation guard-rails; `load_tools_config` reads both keys. Wrapper functions carry docstrings so FastMCP populates the prompt `description`. Prompts return a `str` → FastMCP wraps it as a user `PromptMessage` (v1.22.0, #60)
