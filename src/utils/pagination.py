@@ -1,12 +1,35 @@
 """Pagination utilities for Bitbucket API responses"""
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
 import httpx
 
 logger = logging.getLogger(__name__)
+
+
+# Server-side ceiling on the number of pages a single tool call may fetch.
+#
+# None (the default) means "no ceiling": every existing deployment keeps its current
+# behaviour. It is turned on by ``src.main`` in stateless mode, where a tool call chaining
+# dozens of Bitbucket requests under ``json_response=True`` emits nothing until the very
+# end — long enough for a proxy idle timeout or an edge runtime duration limit to cut the
+# request with no partial result.
+_page_hard_cap: Optional[int] = None
+
+
+def set_page_hard_cap(cap: Optional[int]) -> None:
+    """Set (or clear, with None) the server-side ceiling on pages per tool call."""
+    global _page_hard_cap
+    _page_hard_cap = cap
+    if cap is not None:
+        logger.info(f"Pagination hard cap enabled: max {cap} pages per tool call")
+
+
+def get_page_hard_cap() -> Optional[int]:
+    """Return the active pagination hard cap, or None when disabled."""
+    return _page_hard_cap
 
 
 @dataclass
@@ -17,13 +40,31 @@ class PaginationConfig:
         page_size: Number of items per page (default: 10)
         max_pages: Maximum number of pages to fetch (default: 1, None for unlimited)
         max_items: Maximum total items to fetch (default: None, no limit)
+        hard_capped: Set automatically when the server-side hard cap lowered max_pages.
+            Distinguishes "the server truncated this" from a low max_pages the caller
+            asked for — only the former is reported as ``truncated`` in the response.
     """
     page_size: int = 10
     max_pages: Optional[int] = 1
     max_items: Optional[int] = None
+    hard_capped: bool = field(init=False, default=False)
 
     def __post_init__(self):
-        """Validate configuration and log warnings"""
+        """Apply the server-side hard cap, then validate and log warnings"""
+        cap = get_page_hard_cap()
+        if cap is not None:
+            # `is None` rather than a falsy test: max_pages=0 is an explicit "no page",
+            # which must not be promoted up to the cap.
+            effective = cap if self.max_pages is None else min(self.max_pages, cap)
+            if effective != self.max_pages:
+                logger.info(
+                    f"max_pages lowered from {self.max_pages} to {effective} "
+                    f"by the server-side hard cap"
+                )
+                self.max_pages = effective
+                self.hard_capped = True
+
+        # Warn on the *effective* value, after any clamping, so the log matches reality.
         if self.max_pages is not None and self.max_pages > 10:
             logger.warning(
                 f"max_pages is set to {self.max_pages} which exceeds recommended limit of 10"
@@ -163,7 +204,9 @@ async def aggregate_pages(
             listing). Defaults to False to preserve existing endpoint behaviour.
 
     Returns:
-        Dictionary with aggregated values and metadata from all fetched pages
+        Dictionary with aggregated values and metadata from all fetched pages. Carries
+        ``truncated: True`` when the server-side hard cap cut the walk short while more
+        pages remained — never truncate silently.
     """
     # Add pagelen to params
     params_with_pagination = {**params, "pagelen": config.page_size}
@@ -176,4 +219,26 @@ async def aggregate_pages(
         pages.append(page)
 
     # Aggregate using the sync helper
-    return _aggregate_pages_sync(pages)
+    aggregated = _aggregate_pages_sync(pages)
+
+    # Report a truncation only when the hard cap is what stopped the walk: the page
+    # budget was spent, more data remained, and the caller's own max_items was not
+    # already binding. Testing `next` alone would over-report — paginate_bitbucket leaves
+    # `next` on the yielded page when it stops early on max_items — and so would the page
+    # count alone, since max_items can run out on the very page the budget ends.
+    # When both would stop the walk, the caller's limit wins: nothing was taken away
+    # from them. Distinct from `has_more`, which merely signals "there is a next page".
+    items_fetched = sum(len(page.get("values", [])) for page in pages)
+    stopped_by_max_items = (
+        config.max_items is not None and items_fetched >= config.max_items
+    )
+    if (
+        config.hard_capped
+        and config.max_pages is not None
+        and len(pages) >= config.max_pages
+        and "next" in aggregated
+        and not stopped_by_max_items
+    ):
+        aggregated["truncated"] = True
+
+    return aggregated

@@ -268,6 +268,48 @@ python -m src.main --transport http --host 0.0.0.0 --port 8080
 
 > `--transport sse` (legacy Server-Sent Events) is still accepted but **deprecated** — it emits a `DeprecationWarning`. Prefer `--transport http`.
 
+#### Stateless HTTP (horizontal scaling / serverless)
+
+`--stateless` runs the Streamable HTTP transport without server-side sessions: no `Mcp-Session-Id`, a fresh transport per HTTP request. Any instance behind a load balancer can serve any request — **no sticky sessions required**.
+
+```bash
+python -m src.main --transport http --host 0.0.0.0 --port 8080 --stateless
+```
+
+> ⚠️ **Single-tenant only.** The server serves *its own* process-wide Bitbucket token to every caller. Deploy it on a private network or behind an authenticated reverse proxy. Per-request credentials (multi-tenant) are tracked in [#72](https://github.com/lawp09/bitbucket-mcp/issues/72).
+
+`--stateless` requires `--transport http` (it is rejected on `stdio` and on the legacy `sse`, whose app ignores the setting). It also forces a **single JSON response** instead of an SSE stream, because edge/serverless runtimes cannot hold a streaming response open — there is currently no way to combine stateless with streaming.
+
+A liveness endpoint is exposed on both HTTP transports for load balancers:
+
+```bash
+curl http://localhost:8080/healthz    # {"status": "ok"}
+```
+
+**In a container** — the image's default `CMD` keeps it idle for `exec`-based stdio usage, so server mode is started by overriding the command:
+
+```bash
+podman run -d --name bitbucket-mcp-http -p 8000:8000 --env-file .env bitbucket-mcp-py \
+  python -m src.main --transport http --host 0.0.0.0 --port 8000 --stateless
+```
+
+> Works identically with `docker run`. The image exposes port 8000.
+
+| Environment variable | Default | Purpose |
+|---|---|---|
+| `BITBUCKET_ALLOWED_HOSTS` | *(unset)* | Comma-separated `Host` allowlist. Enables DNS-rebinding protection when set. |
+| `BITBUCKET_ALLOWED_ORIGINS` | *(unset)* | Comma-separated `Origin` allowlist. |
+| `BITBUCKET_MAX_PAGES_HARD_CAP` | `10` | Max pages a single tool call may fetch **in stateless mode**. Beyond it the response carries `truncated: true` — never a silent cut. |
+
+> The two allowlists must be **set together**: an empty `Host` allowlist rejects every request (`421`), and an empty `Origin` allowlist rejects every browser client (`403`). Setting only one is refused at startup rather than silently locking the server out.
+
+```bash
+export BITBUCKET_ALLOWED_HOSTS="mcp.example.com"
+export BITBUCKET_ALLOWED_ORIGINS="https://app.example.com"
+```
+
+> With neither allowlist set, no DNS-rebinding protection is applied — appropriate for a server reached through a private network or a trusted proxy. Set them as soon as the server is exposed on a real hostname.
+
 ## Development
 
 ```bash

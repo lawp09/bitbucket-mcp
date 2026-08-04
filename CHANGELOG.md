@@ -1,5 +1,29 @@
 # Changelog - Bitbucket MCP Server Python
 
+## [1.24.0] - 2026-08-04
+
+### Added
+- **Stateless HTTP mode** (issue #71) — `--stateless` runs the Streamable HTTP transport with no server-side session: no `Mcp-Session-Id`, a fresh transport per request, so any instance behind a load balancer can serve any request without sticky sessions. Enables horizontal scaling and serverless deployment. Requires `--transport http` (rejected with exit code 2 on `stdio` and on the legacy `sse`, whose app ignores the setting — a silently inert flag is a production footgun). Implies a single JSON response instead of an SSE stream, as required by edge runtimes. **Single-tenant**: the process-wide Bitbucket token is served to every caller — deploy behind a private network or an authenticated proxy (per-request credentials tracked in #72).
+- `/healthz` liveness endpoint on both HTTP transports, for load balancers and container health checks. Inert under stdio.
+- Configurable transport security via `BITBUCKET_ALLOWED_HOSTS` / `BITBUCKET_ALLOWED_ORIGINS` (comma-separated): when set, DNS-rebinding protection is enabled with those allowlists. The two must be set **together** — the SDK's checks have no "unset means skip" branch, so an empty `Host` allowlist rejects every request (421, verified live) and an empty `Origin` allowlist rejects every browser client (403). Setting only one exits with code 2 and an explanatory message instead of silently locking the server out.
+- Graceful shutdown on SIGINT/SIGTERM under stdio: the signals cancel the serving task so the cleanup path actually runs (a raw Ctrl-C raises `KeyboardInterrupt` from the loop's internal poll, outside the coroutine frame, skipping it). The handlers are restored to their defaults before cleanup, so a second Ctrl-C during shutdown surfaces as a `KeyboardInterrupt` main() already handles rather than an uncaught `CancelledError` traceback. The HTTP transports are left alone — uvicorn installs its own handling. `"Server stopped by user"` is still printed on the signal path.
+- Pagination hard cap in stateless mode (`BITBUCKET_MAX_PAGES_HARD_CAP`, default 10). With `json_response=True` nothing is emitted until the walk completes, so an unbounded `max_pages=None` can outlive a proxy idle timeout or an edge duration limit. Beyond the cap the response carries `truncated: true` — distinct from `has_more` ("there is a next page") in that it means "the server capped this walk". Never a silent truncation. Inactive outside stateless mode.
+
+### Fixed
+- **HTTP transport rejected any real hostname (421)**. `FastMCP` auto-enables DNS-rebinding protection when constructed on a loopback host (its constructor default), and `src/server.py` builds the server before `--host` is parsed — so `--host 0.0.0.0` behind a reverse proxy or a domain name was refused with `421`/`403` unless the client literally used `localhost`. `main()` now sets `transport_security` explicitly (from the env allowlists, or `None`). Reproduced against v1.23.0 and verified fixed.
+- **`httpx.AsyncClient` was never closed** — `BitbucketClient.close()` had no caller in either transport. `close_clients()` now runs in the server's own event loop on shutdown. This required driving the FastMCP transport coroutines directly (`run_stdio_async` / `run_sse_async` / `run_streamable_http_async`, exactly what `FastMCP.run()` dispatches to) instead of `mcp.run()`: `run()` closes its event loop before returning, so any cleanup wrapped around it would run on a fresh loop and find nothing to close. FastMCP's `lifespan=` is *not* the right hook here — it is per-session (per-request in stateless mode), so closing a shared pool there would cut it under a concurrent request.
+- The `max_pages` recommended-limit warning now logs the effective value, after any clamping, instead of the requested one.
+
+### Changed
+- The Bitbucket client singleton became a registry keyed by event loop (`WeakKeyDictionary`). A connection pool is bound to the loop that created it; a process-wide singleton is fine under uvicorn (one loop for the whole process) but raises `RuntimeError: Event loop is closed` in serverless deployments where each invocation runs its own `asyncio.run()`. Within a loop the client is still reused, so keep-alive pooling is preserved — which matters because `aggregate_pages` chains N requests to `api.bitbucket.org` per tool call. `get_client()` stays a **sync** function: `asyncio.get_running_loop()` only needs a running loop, not a coroutine caller, so none of its ~100 call sites changed.
+- `Dockerfile` declares `EXPOSE 8000`. The `CMD` is deliberately unchanged (`tail -f /dev/null`) — the Makefile's `up` + `exec` workflow depends on it; the README documents the `podman run`/`docker run` invocation that overrides it for server mode.
+
+### Notes
+- Verified against a live server, not only mocks: stateless mode returns no `Mcp-Session-Id` and serves a second request with no shared state; the default HTTP mode still issues a session id and an SSE stream; a foreign `Host` is rejected with 421 once an allowlist is set.
+- Clients still connect to `http://<host>:<port>/mcp`.
+
+---
+
 ## [1.23.0] - 2026-06-29
 
 ### Changed

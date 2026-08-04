@@ -7,7 +7,14 @@ import httpx
 import pytest
 import respx
 
-from src.utils.pagination import PaginationConfig, _aggregate_pages_sync, paginate_bitbucket
+from src.utils.pagination import (
+    PaginationConfig,
+    _aggregate_pages_sync,
+    aggregate_pages,
+    get_page_hard_cap,
+    paginate_bitbucket,
+    set_page_hard_cap,
+)
 
 
 class TestPaginationConfig:
@@ -514,3 +521,237 @@ class TestAggregatePages:
         assert len(result["values"]) == 3
         assert result["values"][0]["metadata"]["type"] == "repo"
         assert result["values"][-1]["name"] == "Item 3"
+
+
+class TestPageHardCap:
+    """Tests for the server-side page hard cap (issue #71, stateless mode)"""
+
+    def test_disabled_by_default(self):
+        """No cap configured: PaginationConfig is untouched (non-regression)."""
+        assert get_page_hard_cap() is None
+
+        config = PaginationConfig(max_pages=None)
+
+        assert config.max_pages is None
+        assert config.hard_capped is False
+
+    def test_clamps_unlimited_max_pages(self):
+        """max_pages=None means unlimited — exactly what the cap exists to bound."""
+        set_page_hard_cap(3)
+
+        config = PaginationConfig(max_pages=None)
+
+        assert config.max_pages == 3
+        assert config.hard_capped is True
+
+    def test_clamps_a_value_above_the_cap(self):
+        set_page_hard_cap(3)
+
+        config = PaginationConfig(max_pages=50)
+
+        assert config.max_pages == 3
+        assert config.hard_capped is True
+
+    def test_leaves_a_value_below_the_cap_alone(self):
+        """A low max_pages is the caller's own choice, not a server truncation."""
+        set_page_hard_cap(10)
+
+        config = PaginationConfig(max_pages=2)
+
+        assert config.max_pages == 2
+        assert config.hard_capped is False
+
+    def test_value_equal_to_the_cap_is_not_flagged(self):
+        set_page_hard_cap(5)
+
+        config = PaginationConfig(max_pages=5)
+
+        assert config.max_pages == 5
+        assert config.hard_capped is False
+
+    def test_zero_max_pages_is_not_promoted(self):
+        """max_pages=0 is an explicit 'no page'; a falsy test would raise it to the cap."""
+        set_page_hard_cap(10)
+
+        config = PaginationConfig(max_pages=0)
+
+        assert config.max_pages == 0
+        assert config.hard_capped is False
+
+    def test_warning_logs_the_effective_value(self, caplog):
+        """The recommended-limit warning must reflect the clamped value, not the request."""
+        set_page_hard_cap(8)
+
+        with caplog.at_level(logging.WARNING):
+            PaginationConfig(max_pages=50)
+
+        assert "50" not in caplog.text or "lowered" in caplog.text
+
+    def test_hard_capped_is_not_settable_by_callers(self):
+        """hard_capped is derived state, never an argument."""
+        with pytest.raises(TypeError):
+            PaginationConfig(max_pages=1, hard_capped=True)
+
+
+class TestTruncationReporting:
+    """aggregate_pages must report a hard-cap truncation, never truncate silently"""
+
+    @pytest.mark.asyncio
+    async def test_truncated_flag_set_when_cap_cuts_the_walk(self):
+        set_page_hard_cap(1)
+
+        page1 = {
+            "values": [{"id": 1}],
+            "pagelen": 1,
+            "size": 10,
+            "next": "https://api.bitbucket.org/2.0/test?page=2",
+        }
+
+        with respx.mock:
+            respx.get(url__regex=r"https://api.bitbucket.org/2.0/test").mock(
+                return_value=httpx.Response(200, json=page1)
+            )
+
+            async with httpx.AsyncClient() as client:
+                config = PaginationConfig(max_pages=None)
+                result = await aggregate_pages(
+                    client, "https://api.bitbucket.org/2.0/test", {}, config
+                )
+
+        assert result["truncated"] is True
+        assert result["values"] == [{"id": 1}]
+
+    @pytest.mark.asyncio
+    async def test_no_truncated_flag_when_data_is_exhausted(self):
+        """Cap active but nothing left to fetch — nothing was truncated."""
+        set_page_hard_cap(5)
+
+        page1 = {"values": [{"id": 1}], "pagelen": 1, "size": 1}
+
+        with respx.mock:
+            respx.get(url__regex=r"https://api.bitbucket.org/2.0/test").mock(
+                return_value=httpx.Response(200, json=page1)
+            )
+
+            async with httpx.AsyncClient() as client:
+                config = PaginationConfig(max_pages=None)
+                result = await aggregate_pages(
+                    client, "https://api.bitbucket.org/2.0/test", {}, config
+                )
+
+        assert "truncated" not in result
+
+    @pytest.mark.asyncio
+    async def test_no_truncated_flag_when_caller_set_the_limit(self):
+        """Cap disabled: stopping on the caller's own max_pages is not a truncation."""
+        page1 = {
+            "values": [{"id": 1}],
+            "pagelen": 1,
+            "size": 10,
+            "next": "https://api.bitbucket.org/2.0/test?page=2",
+        }
+
+        with respx.mock:
+            respx.get(url__regex=r"https://api.bitbucket.org/2.0/test").mock(
+                return_value=httpx.Response(200, json=page1)
+            )
+
+            async with httpx.AsyncClient() as client:
+                config = PaginationConfig(max_pages=1)
+                result = await aggregate_pages(
+                    client, "https://api.bitbucket.org/2.0/test", {}, config
+                )
+
+        assert "truncated" not in result
+        assert result["next"] == "https://api.bitbucket.org/2.0/test?page=2"
+
+    @pytest.mark.asyncio
+    async def test_no_truncated_flag_when_max_items_stopped_the_walk(self):
+        """Regression: the caller's own max_items is not a server-side truncation.
+
+        paginate_bitbucket stops early on max_items but leaves `next` on the yielded
+        page, so keying `truncated` off `next` alone over-reported on every stateless
+        deployment whose caller passed a low max_items (list_issues, get_issue_comments).
+        """
+        set_page_hard_cap(10)
+
+        page1 = {
+            "values": [{"id": 1}, {"id": 2}],
+            "pagelen": 2,
+            "size": 100,
+            "next": "https://api.bitbucket.org/2.0/test?page=2",
+        }
+
+        with respx.mock:
+            respx.get(url__regex=r"https://api.bitbucket.org/2.0/test").mock(
+                return_value=httpx.Response(200, json=page1)
+            )
+
+            async with httpx.AsyncClient() as client:
+                # Hard cap clamps max_pages None -> 10, but max_items stops us at page 1.
+                config = PaginationConfig(max_pages=None, max_items=2)
+                result = await aggregate_pages(
+                    client, "https://api.bitbucket.org/2.0/test", {}, config
+                )
+
+        assert config.hard_capped is True
+        assert "truncated" not in result
+        assert len(result["values"]) == 2
+
+    @pytest.mark.asyncio
+    async def test_no_truncated_flag_when_max_items_coincides_with_the_cap(self):
+        """Regression: max_items can run out on the very page the cap budget ends.
+
+        Keying off the page count alone would then blame the server for a stop the
+        caller's own max_items had already caused.
+        """
+        set_page_hard_cap(2)
+
+        page = {
+            "values": [{"id": 1}, {"id": 2}],
+            "pagelen": 2,
+            "size": 100,
+            "next": "https://api.bitbucket.org/2.0/test?page=next",
+        }
+
+        with respx.mock:
+            respx.get(url__regex=r"https://api.bitbucket.org/2.0/test").mock(
+                return_value=httpx.Response(200, json=page)
+            )
+
+            async with httpx.AsyncClient() as client:
+                # Cap clamps max_pages to 2; max_items=4 is exhausted on that same page 2.
+                config = PaginationConfig(page_size=2, max_pages=None, max_items=4)
+                result = await aggregate_pages(
+                    client, "https://api.bitbucket.org/2.0/test", {}, config
+                )
+
+        assert config.hard_capped is True
+        assert len(result["values"]) == 4
+        assert "truncated" not in result
+
+    @pytest.mark.asyncio
+    async def test_truncated_still_reported_when_max_items_is_not_binding(self):
+        """The cap alone stopping the walk must still be reported."""
+        set_page_hard_cap(2)
+
+        page = {
+            "values": [{"id": 1}, {"id": 2}],
+            "pagelen": 2,
+            "size": 100,
+            "next": "https://api.bitbucket.org/2.0/test?page=next",
+        }
+
+        with respx.mock:
+            respx.get(url__regex=r"https://api.bitbucket.org/2.0/test").mock(
+                return_value=httpx.Response(200, json=page)
+            )
+
+            async with httpx.AsyncClient() as client:
+                # max_items is far from binding: only the cap ends the walk.
+                config = PaginationConfig(page_size=2, max_pages=None, max_items=500)
+                result = await aggregate_pages(
+                    client, "https://api.bitbucket.org/2.0/test", {}, config
+                )
+
+        assert result["truncated"] is True
