@@ -28,6 +28,10 @@ def _slim_paginated(data: Dict[str, Any], transform_fn) -> Dict[str, Any]:
     }
     if "next" in data:
         result["has_more"] = True
+    # Propagated explicitly: this whitelist would otherwise drop the truncation signal
+    # set by aggregate_pages when the server-side page hard cap kicked in.
+    if data.get("truncated"):
+        result["truncated"] = True
     return result
 
 

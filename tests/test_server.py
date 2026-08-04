@@ -1,16 +1,38 @@
 """Tests for MCP server"""
 
+import asyncio
 import os
 import pytest
-from unittest.mock import patch
-from src.server import get_client, _bitbucket_client
+from unittest.mock import AsyncMock, patch
+
+import src.server
+from src.client import BitbucketClient
+from src.server import close_clients, get_client
+
+
+ENV_VARS = {
+    "BITBUCKET_USERNAME": "test@example.com",
+    "BITBUCKET_TOKEN": "test_token",
+    "BITBUCKET_WORKSPACE": "test_workspace",
+}
+
+
+@pytest.fixture(autouse=True)
+def reset_client_registry():
+    """Empty the loop-keyed client registry around every test.
+
+    The registry is module-level state shared by the whole test session; without this,
+    a client created by one test would be handed to the next.
+    """
+    src.server._clients.clear()
+    src.server._no_loop_client = None
+    yield
+    src.server._clients.clear()
+    src.server._no_loop_client = None
 
 
 def test_get_client_missing_env_vars():
     """Test that get_client raises error when env vars missing and no keychain"""
-    import src.server
-    src.server._bitbucket_client = None
-
     with patch.dict(os.environ, {}, clear=True):
         with patch("src.utils.credentials.KEYRING_AVAILABLE", False):
             with pytest.raises(ValueError) as exc_info:
@@ -21,17 +43,7 @@ def test_get_client_missing_env_vars():
 
 def test_get_client_with_env_vars():
     """Test that get_client creates client when env vars present"""
-    # Clear any existing client
-    import src.server
-    src.server._bitbucket_client = None
-
-    env_vars = {
-        "BITBUCKET_USERNAME": "test@example.com",
-        "BITBUCKET_TOKEN": "test_token",
-        "BITBUCKET_WORKSPACE": "test_workspace"
-    }
-
-    with patch.dict(os.environ, env_vars, clear=True):
+    with patch.dict(os.environ, ENV_VARS, clear=True):
         client = get_client()
 
         assert client is not None
@@ -40,22 +52,101 @@ def test_get_client_with_env_vars():
 
 def test_get_client_singleton():
     """Test that get_client returns same instance (singleton pattern)"""
-    # Clear any existing client
-    import src.server
-    src.server._bitbucket_client = None
-
-    env_vars = {
-        "BITBUCKET_USERNAME": "test@example.com",
-        "BITBUCKET_TOKEN": "test_token",
-        "BITBUCKET_WORKSPACE": "test_workspace"
-    }
-
-    with patch.dict(os.environ, env_vars, clear=True):
+    with patch.dict(os.environ, ENV_VARS, clear=True):
         client1 = get_client()
         client2 = get_client()
 
         # Should be the same instance
         assert client1 is client2
+
+
+# ========== Loop-aware client registry (issue #71) ==========
+
+
+def test_get_client_same_instance_within_a_loop():
+    """Within one event loop, the client (and its connection pool) is reused."""
+    async def scenario():
+        return get_client(), get_client()
+
+    with patch.dict(os.environ, ENV_VARS, clear=True):
+        first, second = asyncio.run(scenario())
+
+    assert first is second
+    assert first.workspace == "test_workspace"
+
+
+def test_get_client_new_instance_per_loop():
+    """A fresh event loop gets a fresh client — an httpx pool bound to a closed loop
+    would raise 'Event loop is closed' on reuse (serverless / stateless deployments)."""
+    async def scenario():
+        client = get_client()
+        # Exercise the pool on this loop so a stale one would actually be detected.
+        await client.client.aclose()
+        return client
+
+    with patch.dict(os.environ, ENV_VARS, clear=True):
+        first = asyncio.run(scenario())
+        second = asyncio.run(scenario())
+
+    assert first is not second
+
+
+def test_get_client_outside_loop_is_process_wide():
+    """Called with no running loop, get_client keeps the historical singleton behaviour."""
+    with patch.dict(os.environ, ENV_VARS, clear=True):
+        first = get_client()
+        second = get_client()
+
+    assert first is second
+    assert src.server._no_loop_client is first
+    assert len(src.server._clients) == 0
+
+
+@pytest.mark.asyncio
+async def test_close_clients_closes_and_empties_registry():
+    """close_clients() closes every registered client and clears the registry."""
+    # spec=BitbucketClient so the test fails if close() is ever renamed.
+    mock_client = AsyncMock(spec=BitbucketClient)
+    src.server._clients[asyncio.get_running_loop()] = mock_client
+    src.server._no_loop_client = AsyncMock(spec=BitbucketClient)
+    no_loop = src.server._no_loop_client
+
+    await close_clients()
+
+    mock_client.close.assert_awaited_once()
+    no_loop.close.assert_awaited_once()
+    assert len(src.server._clients) == 0
+    assert src.server._no_loop_client is None
+
+
+@pytest.mark.asyncio
+async def test_close_clients_survives_a_failing_close():
+    """A client bound to a dead loop can raise on close; shutdown must not crash."""
+    failing = AsyncMock(spec=BitbucketClient)
+    failing.close.side_effect = RuntimeError("Event loop is closed")
+    src.server._clients[asyncio.get_running_loop()] = failing
+
+    await close_clients()  # must not raise
+
+    assert len(src.server._clients) == 0
+
+
+@pytest.mark.asyncio
+async def test_close_clients_is_a_noop_when_empty():
+    """Shutdown with nothing registered is harmless."""
+    await close_clients()
+
+    assert len(src.server._clients) == 0
+    assert src.server._no_loop_client is None
+
+
+@pytest.mark.asyncio
+async def test_healthz_route_registered():
+    """The liveness probe is mounted on the HTTP apps."""
+    from src.server import mcp
+
+    paths = [route.path for route in mcp._custom_starlette_routes]
+    assert "/healthz" in paths
 
 
 @pytest.mark.asyncio

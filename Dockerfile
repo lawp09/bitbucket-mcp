@@ -34,6 +34,9 @@ RUN useradd -m -u 1000 mcpuser && \
 
 USER mcpuser
 
+# HTTP transport default port (see --transport http / --stateless)
+EXPOSE 8000
+
 # Container stays alive waiting for exec commands
 # This allows "podman exec -i bitbucket-mcp uv run src/main.py"
 CMD ["tail", "-f", "/dev/null"]

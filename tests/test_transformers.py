@@ -294,6 +294,25 @@ class TestSlimPaginated:
         result = _slim_paginated({"values": []}, lambda x: x)
         assert result["values"] == []
 
+    def test_propagates_truncated_flag(self):
+        """The whitelist would otherwise drop the hard-cap truncation signal (issue #71)."""
+        data = {"values": [1], "page": 1, "truncated": True}
+        result = _slim_paginated(data, lambda x: x)
+        assert result["truncated"] is True
+
+    def test_no_truncated_flag_by_default(self):
+        result = _slim_paginated({"values": [1], "page": 1}, lambda x: x)
+        assert "truncated" not in result
+
+    def test_truncated_and_has_more_coexist(self):
+        """Distinct signals: has_more = 'there is a next page', truncated = 'the server
+        capped this walk, the rest is unreachable via max_pages'."""
+        data = {"values": [1], "page": 1, "next": "https://api.bitbucket.org/2.0/x?page=2",
+                "truncated": True}
+        result = _slim_paginated(data, lambda x: x)
+        assert result["has_more"] is True
+        assert result["truncated"] is True
+
 
 # ========== Repository Tests ==========
 

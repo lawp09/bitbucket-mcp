@@ -8,8 +8,10 @@ import json
 import logging
 from pathlib import Path
 from typing import Optional, Dict, Any
+from weakref import WeakKeyDictionary
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
+from starlette.responses import JSONResponse
 from .client import BitbucketClient, IssueTrackerDisabledError, DEFAULT_MAX_FILE_BYTES
 from .utils.credentials import get_credentials
 from .utils.transformers import (
@@ -294,32 +296,101 @@ def conditional_prompt():
 # Initialiser FastMCP
 mcp = FastMCP("Bitbucket MCP Server")
 
-# Client Bitbucket singleton
-_bitbucket_client: Optional[BitbucketClient] = None
+
+@mcp.custom_route("/healthz", methods=["GET"])
+async def healthz(request):
+    """Liveness probe for load-balanced / containerised deployments.
+
+    Custom routes are only mounted by the HTTP apps (SSE / Streamable HTTP), so this
+    is inert under the stdio transport.
+    """
+    _ = request  # Unused but required by the Starlette endpoint signature
+    return JSONResponse({"status": "ok"})
+
+
+# Bitbucket clients, keyed by the event loop they were created on.
+#
+# An httpx.AsyncClient owns a connection pool bound to the loop that created it. A single
+# process-wide singleton is fine under uvicorn (one process, one loop for its whole
+# lifetime) but breaks in stateless/serverless deployments where each invocation may run
+# its own asyncio.run(): the second invocation would reuse a pool attached to a closed
+# loop and raise "RuntimeError: Event loop is closed".
+#
+# A WeakKeyDictionary (rather than a dict keyed by id(loop)) evicts entries automatically
+# once a loop is garbage collected, and avoids the id-reuse hazard of a bare id().
+_clients: "WeakKeyDictionary[asyncio.AbstractEventLoop, BitbucketClient]" = WeakKeyDictionary()
+
+# Client used when get_client() is called outside any running loop (sync callers, tests).
+_no_loop_client: Optional[BitbucketClient] = None
+
+
+def _new_client() -> BitbucketClient:
+    """Build a Bitbucket client from the configured credentials."""
+    credentials = get_credentials()
+    client = BitbucketClient(
+        credentials.username,
+        credentials.token,
+        credentials.workspace
+    )
+    logger.info(f"Bitbucket client initialized for workspace: {credentials.workspace}")
+    return client
 
 
 def get_client() -> BitbucketClient:
     """
-    Get or create Bitbucket client singleton.
+    Get or create the Bitbucket client bound to the running event loop.
+
+    Stays a regular (sync) function on purpose: asyncio.get_running_loop() only requires
+    that *a* loop is running, not that the caller is a coroutine — and every tool calls
+    get_client() from inside an ``async def``. Keeping it sync avoids touching ~100 call
+    sites and the tests that patch it.
 
     Returns:
-        BitbucketClient instance
+        BitbucketClient instance for the current loop (one per loop, so connection
+        pooling is preserved within a loop).
 
     Raises:
         ValueError: If required environment variables are missing
     """
-    global _bitbucket_client
+    global _no_loop_client
 
-    if _bitbucket_client is None:
-        credentials = get_credentials()
-        _bitbucket_client = BitbucketClient(
-            credentials.username,
-            credentials.token,
-            credentials.workspace
-        )
-        logger.info(f"Bitbucket client initialized for workspace: {credentials.workspace}")
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        # No running loop: keep the historical process-wide singleton behaviour.
+        if _no_loop_client is None:
+            _no_loop_client = _new_client()
+        return _no_loop_client
 
-    return _bitbucket_client
+    client = _clients.get(loop)
+    if client is None:
+        client = _new_client()
+        _clients[loop] = client
+
+    return client
+
+
+async def close_clients() -> None:
+    """Close every registered Bitbucket client and empty the registry.
+
+    Best-effort: a client whose event loop is already closed can raise on close, and a
+    leaked socket at shutdown is less harmful than a crash on the way out. Call this from
+    the loop that served the requests (``src.main`` wires it into the server shutdown) so
+    the common case is a genuine, in-loop close.
+    """
+    global _no_loop_client
+
+    clients = list(_clients.values())
+    _clients.clear()
+    if _no_loop_client is not None:
+        clients.append(_no_loop_client)
+        _no_loop_client = None
+
+    for client in clients:
+        try:
+            await client.close()
+        except Exception as e:
+            logger.warning(f"Error closing Bitbucket client: {e}")
 
 
 # ========== Repository Tools ==========
