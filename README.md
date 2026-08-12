@@ -203,6 +203,16 @@ export BITBUCKET_TOOLS_CONFIG=/path/to/my-tools.json
 > ```
 > get_pull_request_diff(repo_slug, pull_request_id, path="src/services/myService.ts")
 > ```
+>
+> **Token tip** — `get_pipeline_step_logs` returns only the trailing 100 KiB of a step log by
+> default (raw logs run to several MB on long steps). The response carries a `truncated` flag;
+> widen the window with the absolute byte range `start` / `end`, or pass `max_bytes=null` for
+> the whole log. Pass a service container UUID as `log_uuid` to read that service's log
+> instead of the build container's. This endpoint needs a real pipeline **UUID** — resolve it
+> via `get_pipeline_run` if you only have a build number.
+> ```
+> get_pipeline_step_logs(repo_slug, pipeline_uuid="{adab6a1f-...}", step_uuid="{84fc6465-...}")
+> ```
 
 ## MCP Prompts
 
