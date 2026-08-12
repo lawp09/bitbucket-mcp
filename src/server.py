@@ -6,13 +6,27 @@ import os
 import sys
 import json
 import logging
+import time
+from collections import OrderedDict
+from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 from weakref import WeakKeyDictionary
+from mcp.server.auth.settings import AuthSettings
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 from starlette.responses import JSONResponse
+from .auth import (
+    BitbucketTokenVerifier,
+    MultiTenantConfig,
+    DEFAULT_CLIENT_CACHE_SIZE,
+    DEFAULT_CLIENT_CACHE_TTL,
+    current_identity,
+    token_fingerprint,
+)
 from .client import (
+    AuthorizationError,
     BitbucketClient,
     IssueTrackerDisabledError,
     DEFAULT_MAX_FILE_BYTES,
@@ -248,6 +262,63 @@ def _tool_title(tool_name: str) -> str:
     return tool_name.replace("_", " ").title()
 
 
+def _enforce_tenant_policy(tool_name: str, config: MultiTenantConfig) -> None:
+    """Refuse a tool that the multi-tenant exposure policy does not allow.
+
+    ``configs/tools.json`` disables the dangerous tools by default for *single-user*
+    safety. Once several identities share one process the assumptions change, so the
+    policy is re-derived here from the MCP 2025 annotations already attached to every
+    tool (``_classify``) instead of from a second hand-maintained list.
+    """
+    read_only, destructive, _ = _classify(tool_name)
+    if config.read_only and not read_only:
+        raise AuthorizationError(
+            f"Tool '{tool_name}' is not read-only and this server runs in multi-tenant "
+            f"read-only mode."
+        )
+    if destructive and not config.allow_destructive:
+        raise AuthorizationError(
+            f"Tool '{tool_name}' is destructive and is disabled in multi-tenant mode. "
+            f"Set BITBUCKET_MULTITENANT_ALLOW_DESTRUCTIVE=1 to enable it."
+        )
+
+
+def _audit(tool_name: str, workspace: Optional[str]) -> None:
+    """Record who invoked what, on a dedicated logger, never with credentials.
+
+    Only emitted in multi-tenant mode: in stdio/single-user mode there is one identity
+    for the whole process and an audit line per call would be pure noise.
+    """
+    if _multi_tenant is None:
+        return
+    token = current_identity()
+    account_id = token.identity.account_id if token else "<unauthenticated>"
+    resolved = workspace or (token.identity.workspace if token else None)
+    audit_logger.info(
+        "tool=%s account_id=%s workspace=%s", tool_name, account_id, resolved or "<unset>"
+    )
+
+
+def _instrument_tool(tool_name: str, func):
+    """Wrap a tool with the multi-tenant policy check, the audit line and a client scope.
+
+    Applied to every tool from the single ``conditional_tool`` site, so none of the ~96
+    tool bodies has to know about any of it. ``functools.wraps`` keeps ``__wrapped__``
+    set, which is what lets FastMCP's ``inspect.signature`` still derive the input schema
+    from the real function.
+    """
+    @functools.wraps(func)
+    async def wrapper(*args, **kwargs):
+        config = _multi_tenant
+        if config is not None:
+            _enforce_tenant_policy(tool_name, config)
+        _audit(tool_name, kwargs.get("workspace"))
+        async with _client_scope():
+            return await func(*args, **kwargs)
+
+    return wrapper
+
+
 def conditional_tool(structured_output: bool = True):
     """
     Decorator that conditionally registers a tool based on configuration.
@@ -257,6 +328,10 @@ def conditional_tool(structured_output: bool = True):
     from the tool name). Otherwise, the function remains as a regular async function
     without MCP registration.
 
+    Either way the function is wrapped by :func:`_instrument_tool` (multi-tenant policy,
+    audit trail, client lifetime scope) so a tool re-enabled through a custom
+    ``BITBUCKET_TOOLS_CONFIG`` is never instrumented differently from a bundled one.
+
     Args:
         structured_output: If True, enable structured output for dict returns.
                           Returns proper JSON objects instead of serialized strings.
@@ -264,16 +339,17 @@ def conditional_tool(structured_output: bool = True):
     """
     def decorator(func):
         tool_name = func.__name__
+        instrumented = _instrument_tool(tool_name, func)
         if is_tool_enabled(tool_name):
             logger.debug(f"Registering tool: {tool_name} (structured_output={structured_output})")
             return mcp.tool(
                 structured_output=structured_output,
                 title=_tool_title(tool_name),
                 annotations=_tool_annotations(tool_name),
-            )(func)
+            )(instrumented)
         else:
             logger.info(f"Tool disabled by configuration: {tool_name}")
-            return func
+            return instrumented
     return decorator
 
 
@@ -356,8 +432,13 @@ def get_client() -> BitbucketClient:
 
     Raises:
         ValueError: If required environment variables are missing
+        AuthorizationError: In multi-tenant mode, when the request carries no verified
+            Bitbucket identity (fail-closed — never falls back to process credentials)
     """
     global _no_loop_client
+
+    if _multi_tenant is not None:
+        return _get_tenant_client()
 
     try:
         loop = asyncio.get_running_loop()
@@ -372,6 +453,281 @@ def get_client() -> BitbucketClient:
         client = _new_client()
         _clients[loop] = client
 
+    return client
+
+
+# ========== Multi-tenant: per-identity clients (issue #72) ==========
+#
+# In multi-tenant HTTP mode the process holds no Bitbucket credential of its own: each
+# request carries a verified bearer token (see src/auth.py), and the client that serves it
+# is built from *that* token. Two consequences drive the design below.
+#
+# 1. One client per (identity, workspace) instead of one per process — so two callers can
+#    never share a connection pool, and `workspace=None` resolves to the *caller's*
+#    workspace (the per-identity client's default), never the process one.
+# 2. The cache must be bounded: one httpx.AsyncClient is one connection pool, and the set
+#    of identities is open-ended. LRU + TTL, with aclose() on eviction.
+#
+# The registry stays keyed by event loop first (the #71 invariant: a pool belongs to the
+# loop that created it), with the (identity, workspace) cache nested inside.
+
+#: Active multi-tenant configuration, or None for the single-user default.
+_multi_tenant: Optional[MultiTenantConfig] = None
+
+audit_logger = logging.getLogger("bitbucket_mcp.audit")
+
+#: Clients used by the tool call currently being served, so an LRU eviction cannot close
+#: a client under a live request. Set per call by :func:`_client_scope`.
+_clients_in_use: ContextVar[Optional[list]] = ContextVar("bitbucket_clients_in_use", default=None)
+
+
+class _TenantClientCache:
+    """Bounded LRU + TTL cache of per-identity Bitbucket clients, for one event loop.
+
+    Evicted clients are not closed inline: :func:`get_client` is synchronous and cannot
+    await, and an evicted client may still be in use by a concurrent request. They are
+    marked retired and parked in :attr:`pending`, then closed once idle.
+    """
+
+    def __init__(self, maxsize: int, ttl: int):
+        self.maxsize = max(1, maxsize)
+        self.ttl = max(0, ttl)
+        # key -> (expires_at, token fingerprint, client). The fingerprint is stored next
+        # to the client rather than folded into the key so a token rotation *replaces* the
+        # identity's entry instead of adding a second one — otherwise a caller refreshing
+        # their token would accumulate one cache slot (and one connection pool) per
+        # rotation until the LRU pushed them out.
+        self._entries: "OrderedDict[Tuple[str, Optional[str]], Tuple[float, str, BitbucketClient]]" = OrderedDict()
+        self.pending: list = []
+
+    def __len__(self) -> int:
+        return len(self._entries)
+
+    def get(self, key, fingerprint: str) -> Optional[BitbucketClient]:
+        """Return the cached client for `key`, if it is fresh **and** holds this token.
+
+        A hit must mean "same token", not merely "same account": the credential is baked
+        into the client's headers at construction, so serving a rotated-token request from
+        a stale client would keep hitting Bitbucket with the previous credential.
+        """
+        entry = self._entries.get(key)
+        if entry is None:
+            return None
+        expires_at, cached_fingerprint, client = entry
+        # No `self.ttl and ...` guard: with ttl=0 the entry expires immediately, i.e. a
+        # fresh client per request. Same meaning as ttl=0 on the verifier's token cache —
+        # the two knobs must not read "no caching" on one and "cache forever" on the other.
+        if expires_at <= time.monotonic() or cached_fingerprint != fingerprint:
+            del self._entries[key]
+            self._retire(client)
+            return None
+        self._entries.move_to_end(key)
+        return client
+
+    def put(self, key, fingerprint: str, client: BitbucketClient) -> None:
+        existing = self._entries.pop(key, None)
+        if existing is not None:
+            self._retire(existing[2])
+        self._entries[key] = (time.monotonic() + self.ttl, fingerprint, client)
+        while len(self._entries) > self.maxsize:
+            _, (_, _, evicted) = self._entries.popitem(last=False)
+            self._retire(evicted)
+
+    def _retire(self, client: BitbucketClient) -> None:
+        client._retired = True
+        self.pending.append(client)
+
+    def retire_all(self) -> None:
+        """Retire every cached client (shutdown path)."""
+        for _, _, client in self._entries.values():
+            self._retire(client)
+        self._entries.clear()
+
+
+def _cache_for_loop(loop) -> _TenantClientCache:
+    """Return (creating if needed) the per-identity client cache for `loop`."""
+    cache = _tenant_clients.get(loop)
+    if cache is None:
+        config = _multi_tenant
+        cache = _TenantClientCache(
+            maxsize=config.client_cache_size if config else DEFAULT_CLIENT_CACHE_SIZE,
+            ttl=config.client_cache_ttl if config else DEFAULT_CLIENT_CACHE_TTL,
+        )
+        _tenant_clients[loop] = cache
+    return cache
+
+
+_tenant_clients: "WeakKeyDictionary[asyncio.AbstractEventLoop, _TenantClientCache]" = WeakKeyDictionary()
+
+
+async def _close_client(client: BitbucketClient) -> None:
+    """Close one client, never letting a cleanup failure escape."""
+    try:
+        await client.close()
+    except Exception as e:
+        logger.warning(f"Error closing Bitbucket client: {e}")
+
+
+async def _drain_pending(cache: _TenantClientCache) -> None:
+    """Close every retired client that no request is using any more.
+
+    Two drain tasks can be in flight on the same cache at once (``_schedule_drain`` fires
+    whenever there is anything pending). Take the batch by swapping the list out
+    **synchronously**, before the first await, and merge the leftovers back onto whatever
+    accumulated meanwhile: overwriting ``cache.pending`` at the end instead would drop
+    clients retired during the drain, leaking their connection pools with nothing left
+    holding a reference to close them.
+    """
+    batch, cache.pending = cache.pending, []
+    still_busy = []
+    for client in batch:
+        if client._inflight > 0:
+            still_busy.append(client)
+            continue
+        await _close_client(client)
+    cache.pending = still_busy + cache.pending
+
+
+#: Strong references to the in-flight drain tasks. The event loop only keeps *weak* ones,
+#: so a task nobody holds can be garbage collected before it runs — here that would leave
+#: retired clients (and their sockets) open until the next drain or process shutdown.
+_drain_tasks: set = set()
+
+
+def _schedule_drain(cache: _TenantClientCache) -> None:
+    """Ask the running loop to drain the retired clients, if there is one."""
+    if not cache.pending:
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:  # pragma: no cover - no loop: close_clients() will drain
+        return
+    task = loop.create_task(_drain_pending(cache))
+    _drain_tasks.add(task)
+    task.add_done_callback(_drain_tasks.discard)
+
+
+def _acquire(client: BitbucketClient) -> None:
+    """Mark `client` as used by the tool call in progress, if we are inside one.
+
+    Outside a scope there is nothing to release the client later, so it would keep an
+    in-flight count forever; we skip instead — but say so loudly in multi-tenant mode,
+    where the consequence is a client with no protection against being closed by an LRU
+    eviction mid-use. Every current call site goes through ``_instrument_tool``, which
+    always opens a scope; this guards a future one that would not.
+    """
+    in_use = _clients_in_use.get()
+    if in_use is None:
+        if _multi_tenant is not None:
+            logger.warning(
+                "get_client() called outside a tool scope: the client is not protected "
+                "against eviction while in use."
+            )
+        return
+    if client in in_use:
+        return
+    in_use.append(client)
+    client._inflight += 1
+
+
+@asynccontextmanager
+async def _client_scope():
+    """Delimit one tool call, releasing the clients it used on the way out.
+
+    A client retired while this call was running (LRU eviction or TTL expiry) is closed
+    here, once its last user is gone — never mid-request.
+    """
+    reset_token = _clients_in_use.set([])
+    try:
+        yield
+    finally:
+        in_use = _clients_in_use.get() or []
+        _clients_in_use.reset(reset_token)
+        for client in in_use:
+            client._inflight -= 1
+            if client._inflight <= 0 and client._retired:
+                await _close_client(client)
+
+
+def enable_multi_tenant(config: MultiTenantConfig) -> BitbucketTokenVerifier:
+    """Switch the server to per-request Bitbucket credentials.
+
+    Wires the SDK's bearer authentication onto the already-constructed ``mcp`` singleton.
+    It has to be done here rather than through the ``FastMCP(...)`` constructor: the
+    constructor rejects ``token_verifier`` without ``auth`` (and vice versa), and the
+    singleton is built at import time — before the CLI has been parsed. Both attributes
+    are read lazily when ``streamable_http_app()`` builds the ASGI app, exactly like
+    ``host``/``port``/``transport_security`` already are in ``src.main``.
+
+    ``_token_verifier`` is a private SDK attribute; ``tests/test_multitenant.py`` asserts
+    it still exists so an upstream rename fails loudly instead of silently disabling auth.
+
+    Returns:
+        The verifier that was installed.
+    """
+    global _multi_tenant
+
+    verifier = BitbucketTokenVerifier(
+        cache_ttl=config.token_cache_ttl,
+        cache_size=config.token_cache_size,
+    )
+    mcp.settings.auth = AuthSettings(
+        issuer_url=config.issuer_url,
+        resource_server_url=config.resource_server_url,
+        # No server-side scope requirement: the caller's token carries the caller's own
+        # Bitbucket rights, and Bitbucket answers 401/403 per call. Enforcing a scope list
+        # here would only reject valid tokens on a name we cannot read from /2.0/user.
+        required_scopes=None,
+    )
+    mcp._token_verifier = verifier
+    _multi_tenant = config
+    logger.info(
+        "Multi-tenant mode enabled (resource=%s, issuer=%s, read_only=%s, allow_destructive=%s)",
+        config.resource_server_url,
+        config.issuer_url,
+        config.read_only,
+        config.allow_destructive,
+    )
+    return verifier
+
+
+def _get_tenant_client() -> BitbucketClient:
+    """Return the Bitbucket client of the identity being served. Fail-closed.
+
+    Never falls back to the process credentials: in multi-tenant mode there may not even
+    be any, and silently borrowing them would run one caller's request under another
+    principal's rights.
+    """
+    token = current_identity()
+    if token is None:
+        raise AuthorizationError(
+            "This server runs in multi-tenant mode: the request must carry a verified "
+            "Bitbucket bearer token."
+        )
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        # The historical no-loop path builds a client from the *process* credentials.
+        # That is a fail-open hole in multi-tenant mode, so refuse instead.
+        raise AuthorizationError(
+            "Multi-tenant mode requires a running event loop to isolate per-identity "
+            "clients.",
+            account_id=token.identity.account_id,
+        )
+
+    identity = token.identity
+    cache = _cache_for_loop(loop)
+    key = (identity.account_id, identity.workspace)
+    fingerprint = token_fingerprint(token.token)
+    client = cache.get(key, fingerprint)
+    if client is None:
+        client = BitbucketClient.from_bearer(
+            token.token, identity.workspace, account_id=identity.account_id
+        )
+        cache.put(key, fingerprint, client)
+    _acquire(client)
+    _schedule_drain(cache)
     return client
 
 
@@ -396,6 +752,24 @@ async def close_clients() -> None:
             await client.close()
         except Exception as e:
             logger.warning(f"Error closing Bitbucket client: {e}")
+
+    # Let any in-flight drain task finish first, so it cannot be reassigning
+    # `cache.pending` underneath the loop below. Best-effort: a drain only closes clients,
+    # and close() is idempotent, so a task that outlives this wait is harmless.
+    for task in list(_drain_tasks):
+        try:
+            await task
+        except Exception as e:  # pragma: no cover - defensive
+            logger.warning(f"Error draining Bitbucket clients: {e}")
+
+    # Per-identity caches: retire everything, then close, ignoring the in-flight guard —
+    # this is shutdown, there is nothing left to protect a live request from.
+    for cache in list(_tenant_clients.values()):
+        cache.retire_all()
+        for client in cache.pending:
+            await _close_client(client)
+        cache.pending = []
+    _tenant_clients.clear()
 
 
 # ========== Repository Tools ==========

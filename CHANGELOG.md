@@ -1,5 +1,35 @@
 # Changelog - Bitbucket MCP Server Python
 
+## [1.26.0] - 2026-08-12
+
+### Added
+- **Multi-tenant HTTP mode** (issue #72) — `--multi-tenant` lets one process serve several users, each acting under **their own Bitbucket identity**. Each request carries the caller's Bitbucket OAuth access token as `Authorization: Bearer`; the server verifies it by use (`GET /2.0/user`), derives the caller's `account_id` and default workspace, and reuses the same token for the downstream calls. **No credential store, no mapping, no new dependency** — the token presented *is* the caller's credential, carrying exactly the caller's rights. Rejected alternatives: a raw-token pass-through header (no verified identity, no OAuth discoverability) and an identity→stored-credentials mapping (a persistent store is a new attack surface for no gain here). Requires `--transport http` and `BITBUCKET_RESOURCE_SERVER_URL`; combines with `--stateless`.
+- Injectable auth strategy on `BitbucketClient` — `BasicAuthStrategy` (unchanged default) and `BearerAuthStrategy`, behind the new `BitbucketClient.from_bearer()`. The public constructor `BitbucketClient(email, token, workspace)` is untouched; both strategies redact their credential in `repr()`.
+- Bounded per-identity client cache, keyed `(account_id, workspace)` **inside** the existing loop-keyed registry from #71, so a connection pool still belongs to the loop that created it. LRU + TTL (`BITBUCKET_CLIENT_CACHE_SIZE`/`_TTL`, defaults 128/900 s) with `aclose()` on eviction — but a client evicted while a request is still using it is only retired, then closed once its last in-flight caller is gone, never mid-request. Each entry also records the fingerprint of the token it was built with, so a caller who rotates their OAuth token gets a rebuilt client (replacing their entry) instead of being served the stale credential.
+- Bounded token-verification cache keyed by a SHA-256 **fingerprint**, never the token (`BITBUCKET_TOKEN_CACHE_SIZE`/`_TTL`, defaults 256/300 s). Concurrent first-time verifications of the same token are de-duplicated into a single pair of Bitbucket calls. The TTL is the **revocation window**; `BITBUCKET_TOKEN_CACHE_TTL=0` verifies on every request.
+- Audit trail on the `bitbucket_mcp.audit` logger — tool name, `account_id`, workspace. Never credentials, never raw arguments. Emitted in multi-tenant mode only; stdio stays silent.
+- Multi-tenant exposure policy derived from the MCP 2025 annotations already on every tool: `destructiveHint` tools are refused unless `BITBUCKET_MULTITENANT_ALLOW_DESTRUCTIVE=1`, and `BITBUCKET_MULTITENANT_READ_ONLY=1` narrows exposure to `readOnlyHint` tools. No second hand-maintained list.
+- Typed `AuthorizationError`, following the `IssueTrackerDisabledError` convention: raised when a multi-tenant request carries no verified identity, when an identity resolves to no workspace and none was passed, or when Bitbucket answers 401/403 to a bearer call. The message carries the account id, workspace and status — **never a token**.
+- `docs/deployment-modes.md` — the three deployment modes (stdio single-user / HTTP single-tenant / HTTP multi-tenant) with the threat model, mitigations and residual risks of each.
+
+### Security
+- **Fail-closed by construction.** In multi-tenant mode `get_client()` never falls back to the process credentials: no verified identity raises, and the historical "no running event loop" path — which built a client from `BITBUCKET_TOKEN` — is refused rather than silently running one caller's request under another principal.
+- `workspace=None` now resolves to the **caller's** workspace, never the process one, because the per-identity client carries the caller's default. Where the caller has zero or several workspace memberships there is no default at all and the call fails with a clear error instead of building a `/repositories/None/...` URL. Routed through a single `BitbucketClient._resolve_workspace()` used by all 90 call sites, so the guard cannot be forgotten on a new method.
+- The `token` field of the access token is declared `repr=False`: the inherited pydantic repr would otherwise print the raw credential into any log line or traceback rendering it.
+
+### Changed
+- Every tool is now wrapped once, from the single `conditional_tool` site, with the multi-tenant policy check, the audit line and a client-lifetime scope. `functools.wraps` keeps `__wrapped__` set so FastMCP still derives the input schema from the real signature — asserted by a test.
+- Bearer (multi-tenant) clients map 401/403 to `AuthorizationError` via an httpx response hook. Basic-Auth clients are deliberately left alone: a 403 is a documented outcome for some endpoints (e.g. `get_pipeline_config` without `admin:repository`) and callers already handle it as an `httpx.HTTPStatusError`.
+- `BitbucketClient.close()` is idempotent, so the several cleanup paths cannot double-close.
+- In multi-tenant mode the startup credential check is skipped (there is nothing to check); a leftover `BITBUCKET_TOKEN` is reported as ignored rather than silently unused.
+
+### Notes
+- **Repository and Workspace Access Tokens are not supported** in multi-tenant mode: they are not bound to a user account, so `GET /2.0/user` rejects them and no identity can be derived. Use single-tenant HTTP for that case.
+- The server enforces no scopes of its own — Bitbucket answers 401/403 per call, and the scope names are not readable from `/2.0/user`.
+- Rate limiting is not implemented and largely moot here: Bitbucket quotas are per account, and each call consumes the *caller's* quota, so one tenant cannot drain another's. The stateless pagination hard cap from #71 still bounds per-call amplification.
+- The Python SDK caps at MCP protocol `2025-11-25`; this mode uses the OAuth primitives available there. Full alignment with the `2026-07-28` authorization model waits on SDK support.
+- `enable_multi_tenant()` assigns `mcp.settings.auth` and the SDK-private `mcp._token_verifier` after construction, because `FastMCP(...)` rejects one without the other and the singleton is built at import time, before the CLI is parsed — the same pattern already used for `host`/`port`/`transport_security`. A guard test fails loudly if the SDK renames either.
+
 ## [1.25.0] - 2026-08-12
 
 ### Fixed

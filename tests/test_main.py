@@ -39,6 +39,14 @@ def clean_env():
         "BITBUCKET_ALLOWED_HOSTS",
         "BITBUCKET_ALLOWED_ORIGINS",
         "BITBUCKET_MAX_PAGES_HARD_CAP",
+        "BITBUCKET_RESOURCE_SERVER_URL",
+        "BITBUCKET_OAUTH_ISSUER_URL",
+        "BITBUCKET_CLIENT_CACHE_SIZE",
+        "BITBUCKET_CLIENT_CACHE_TTL",
+        "BITBUCKET_TOKEN_CACHE_SIZE",
+        "BITBUCKET_TOKEN_CACHE_TTL",
+        "BITBUCKET_MULTITENANT_ALLOW_DESTRUCTIVE",
+        "BITBUCKET_MULTITENANT_READ_ONLY",
     )
     saved = {k: os.environ.pop(k, None) for k in keys}
     yield
@@ -394,3 +402,106 @@ def test_signal_handlers_are_removed_before_cleanup():
         ("remove", (signal.SIGINT, signal.SIGTERM)),
         ("close", ()),
     ]
+
+
+# ========== Multi-tenant mode (#72) ==========
+
+
+@pytest.fixture
+def restore_multi_tenant():
+    """Undo the global auth wiring enable_multi_tenant() installs."""
+    saved_auth = mcp.settings.auth
+    saved_verifier = getattr(mcp, "_token_verifier", None)
+    yield
+    src.server._multi_tenant = None
+    src.server._tenant_clients.clear()
+    mcp.settings.auth = saved_auth
+    mcp._token_verifier = saved_verifier
+
+
+@pytest.mark.parametrize("transport", ["stdio", "sse"])
+@pytest.mark.filterwarnings("ignore::DeprecationWarning")
+def test_multi_tenant_rejected_outside_http(transport):
+    """Bearer auth only exists over HTTP; a silently ignored flag would be a footgun."""
+    with _Transports(), patch(CREDS_TARGET):
+        with pytest.raises(SystemExit):
+            main(["--transport", transport, "--multi-tenant"])
+
+
+def test_multi_tenant_requires_a_resource_server_url():
+    """Guessing the public URL would hand clients a wrong discovery document."""
+    with _Transports(), patch(CREDS_TARGET):
+        with pytest.raises(SystemExit):
+            main(["--transport", "http", "--multi-tenant"])
+
+
+def test_multi_tenant_wires_auth_from_the_environment(restore_multi_tenant):
+    env = {
+        "BITBUCKET_RESOURCE_SERVER_URL": "https://mcp.example.com",
+        "BITBUCKET_CLIENT_CACHE_SIZE": "7",
+        "BITBUCKET_TOKEN_CACHE_TTL": "0",
+        "BITBUCKET_MULTITENANT_READ_ONLY": "1",
+    }
+    with _Transports() as t, patch.dict(os.environ, env), patch(CREDS_TARGET) as creds:
+        main(["--transport", "http", "--multi-tenant"])
+
+    t["run_streamable_http_async"].assert_awaited_once()
+    # No process credential is needed — and none is read.
+    creds.assert_not_called()
+
+    config = src.server._multi_tenant
+    assert config is not None
+    assert config.client_cache_size == 7
+    assert config.token_cache_ttl == 0
+    assert config.read_only is True
+    assert config.allow_destructive is False
+    assert mcp._token_verifier is not None
+    assert str(mcp.settings.auth.resource_server_url).rstrip("/") == "https://mcp.example.com"
+
+
+def test_multi_tenant_warns_about_an_unused_process_token(restore_multi_tenant, capsys):
+    env = {
+        "BITBUCKET_RESOURCE_SERVER_URL": "https://mcp.example.com",
+        "BITBUCKET_TOKEN": "leftover-process-token",
+    }
+    with _Transports(), patch.dict(os.environ, env), patch(CREDS_TARGET):
+        main(["--transport", "http", "--multi-tenant"])
+
+    stderr = capsys.readouterr().err
+    assert "ignored in --multi-tenant mode" in stderr
+    assert "leftover-process-token" not in stderr
+
+
+def test_multi_tenant_combines_with_stateless(restore_multi_tenant):
+    env = {"BITBUCKET_RESOURCE_SERVER_URL": "https://mcp.example.com"}
+    with _Transports(), patch.dict(os.environ, env), patch(CREDS_TARGET):
+        main(["--transport", "http", "--stateless", "--multi-tenant"])
+
+    assert mcp.settings.stateless_http is True
+    assert src.server._multi_tenant is not None
+
+
+def test_single_tenant_leaves_auth_unconfigured():
+    """The default path must not touch the SDK auth wiring at all."""
+    with _Transports(), patch(CREDS_TARGET):
+        main(["--transport", "http"])
+    assert src.server._multi_tenant is None
+
+
+@pytest.mark.parametrize("raw,expected", [("", 128), ("abc", 128), ("-5", 128), ("42", 42)])
+def test_env_int_falls_back_on_a_bad_value(raw, expected):
+    from src.main import _env_int
+
+    with patch.dict(os.environ, {"SOME_KNOB": raw}):
+        assert _env_int("SOME_KNOB", 128) == expected
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [("1", True), ("true", True), ("YES", True), ("on", True), ("0", False), ("", False)],
+)
+def test_env_flag_parsing(raw, expected):
+    from src.main import _env_flag
+
+    with patch.dict(os.environ, {"SOME_FLAG": raw}):
+        assert _env_flag("SOME_FLAG") is expected
