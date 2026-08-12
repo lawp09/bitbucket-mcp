@@ -36,7 +36,7 @@ def build_debug_pipeline_failure_prompt(repo_slug: str, pipeline_uuid: str) -> s
 Investigate using these tools, in order:
 1. get_pipeline_run(repo_slug="{repo_slug}", pipeline_uuid="{pipeline_uuid}") — status and trigger info
 2. get_pipeline_steps(repo_slug="{repo_slug}", pipeline_uuid="{pipeline_uuid}") — identify the failed step(s)
-3. get_pipeline_step_logs(repo_slug="{repo_slug}", pipeline_uuid="{pipeline_uuid}", step_uuid="<failed step uuid>") — read the logs of each failed step
+3. get_pipeline_step_logs(repo_slug="{repo_slug}", pipeline_uuid="{pipeline_uuid}", step_uuid="<failed step uuid>") — read the `content` of each failed step's log (only the tail is returned by default; if `truncated` is true and the root cause is not in it, widen the window with start/end)
 
 Then produce a structured diagnosis:
 - **Root cause** — the underlying reason for the failure

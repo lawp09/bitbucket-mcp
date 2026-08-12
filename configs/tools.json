@@ -211,7 +211,7 @@
       },
       "get_pipeline_step_logs": {
         "enabled": true,
-        "description": "Get logs for a specific pipeline step"
+        "description": "Get logs for a specific pipeline step (returns the trailing 100 KiB by default; supports start/end byte ranges and service-container logs)"
       },
       "run_pipeline": {
         "enabled": true,

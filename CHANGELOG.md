@@ -1,5 +1,26 @@
 # Changelog - Bitbucket MCP Server Python
 
+## [1.25.0] - 2026-08-12
+
+### Fixed
+- **`get_pipeline_step_logs` always failed with HTTP 406** (issue #74). The pipeline step log endpoint is the only one in this client that does not return JSON — the Bitbucket spec declares `produces: [application/octet-stream]` — so the client-wide `Accept: application/json` header made the API reject every single request. The log call now overrides `Accept: */*` per request; the JSON default is untouched for all other endpoints.
+- **307 redirect was not followed** on the same endpoint. Once a step completes, its log is moved to long-term storage and the API answers `307`. `httpx.AsyncClient` defaults to `follow_redirects=False` and `raise_for_status()` raises on an unfollowed redirect — so with only the 406 fixed, every *completed* step (exactly the case where one wants to read logs) would have failed on the redirect instead. The call now passes `follow_redirects=True`. httpx strips the `Authorization` header on that cross-origin hop by itself, which is what we want: the storage URL is pre-signed and must not receive Bitbucket credentials. Covered by a regression test.
+
+### Added
+- Size bounding on `get_pipeline_step_logs`. Raw step logs routinely run to several MB (a 24-minute step in the issue's repro), and returning them wholesale blows up the MCP client's context. By default only the trailing 100 KiB are returned, requested via the HTTP `Range` header the endpoint documents (hence its documented `416`). New `start` / `end` parameters take an **absolute, inclusive** byte window, and `max_bytes=null` opts out entirely.
+- `log_uuid` parameter on `get_pipeline_step_logs`, exposing `.../steps/{step_uuid}/logs/{log_uuid}` — the build container's log is the default, a service container UUID reads that service's log instead. Useful when a step fails inside a service container.
+- The response body is now **streamed** with a rolling buffer and a 50 MiB ceiling, so an oversized log cannot exhaust memory even when the long-term-storage host ignores `Range` and replies `200` with the whole file. In that case the requested window is reconstructed client-side rather than silently returning the wrong slice.
+
+### Changed
+- **Breaking**: `get_pipeline_step_logs` returns a `Dict[str, Any]` — `content`, `truncated`, `returned_bytes`, `total_bytes` — instead of a bare `str`, aligning it with the project's structured-output convention and making the size bounding visible to the caller. No caller can have depended on the old shape: the tool returned `406` on every invocation.
+- The tool description now states that this endpoint needs a real pipeline **UUID**. A build number happens to work on `get_pipeline_run`, but it is not documented for the log endpoint — resolve the UUID first.
+
+### Notes
+- `304` / `If-None-Match` caching is documented by the endpoint but deliberately not exposed: this client keeps no caller-side etag store.
+- Derived from the official Bitbucket spec plus a community thread, and verified against mocks; a live `curl` against a completed step is still worth doing before relying on the `206` path, which Bitbucket's own documented response list omits.
+
+---
+
 ## [1.24.0] - 2026-08-04
 
 ### Added

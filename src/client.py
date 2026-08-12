@@ -2,6 +2,7 @@
 
 import base64
 import logging
+import re
 import urllib.parse
 from typing import Any, Dict, Optional
 import httpx
@@ -15,6 +16,21 @@ logger = logging.getLogger(__name__)
 # LLM token budget and are better fetched via git; callers can raise it explicitly.
 # Public so the server layer reuses the same default instead of duplicating the literal.
 DEFAULT_MAX_FILE_BYTES = 256 * 1024
+
+# Trailing slice of a pipeline step log returned by default (100 KiB). Raw logs run
+# to many MB on long steps and the tail is where failures live; callers wanting more
+# pass an explicit start/end window or max_bytes=None.
+DEFAULT_MAX_LOG_BYTES = 100 * 1024
+
+# Hard ceiling on the number of bytes pulled off the wire for a single log request,
+# whatever the Range outcome. Guards the case where the long-term-storage host
+# ignores Range and streams a multi-GB log at us.
+MAX_LOG_STREAM_BYTES = 50 * 1024 * 1024
+
+# `bytes 0-99/2048`, `bytes 0-99/*` and the 416 form `bytes */2048`.
+_CONTENT_RANGE_RE = re.compile(
+    r"^\s*bytes\s+(?:(\d+)-(\d+)|\*)/(\d+|\*)\s*$", re.IGNORECASE
+)
 
 # Mimetypes refused by get_file_content: returning their bytes as text would yield
 # mojibake and a huge useless payload. Kept deliberately narrow so source files
@@ -46,6 +62,138 @@ def _is_binary_mimetype(mimetype: Optional[str]) -> bool:
         return False
     mt = mimetype.lower().split(";")[0].strip()
     return mt in _BINARY_MIMETYPES or mt.startswith(_BINARY_MIMETYPE_PREFIXES)
+
+
+def _parse_content_range(
+    header: Optional[str],
+) -> tuple[Optional[int], Optional[int], Optional[int]]:
+    """Parse a ``Content-Range`` header into ``(start, end, total)``.
+
+    Every component degrades to ``None`` rather than raising: RFC 7233 allows an
+    unknown total (``bytes 0-99/*``) and a redirected storage host may omit or
+    malform the header entirely. A crash here would break the very call this
+    parsing is meant to make usable.
+    """
+    if not header:
+        return None, None, None
+    match = _CONTENT_RANGE_RE.match(header)
+    if not match:
+        return None, None, None
+    raw_start, raw_end, raw_total = match.groups()
+    return (
+        int(raw_start) if raw_start is not None else None,
+        int(raw_end) if raw_end is not None else None,
+        int(raw_total) if raw_total != "*" else None,
+    )
+
+
+def _build_log_range(
+    start: Optional[int], end: Optional[int], max_bytes: Optional[int]
+) -> tuple[Optional[str], Optional[int], Optional[int]]:
+    """Validate the log window and build its ``Range`` header.
+
+    Returns ``(header, effective_start, effective_end)``. ``header`` is None when
+    the caller asked for the whole log (no window, no cap).
+
+    Raises:
+        ValueError: On a non-integer or negative bound, an inverted window, or a
+            non-positive ``max_bytes`` — caught locally so the caller gets a clear
+            message instead of an opaque 400/416 from Bitbucket.
+    """
+    for name, value in (("start", start), ("end", end), ("max_bytes", max_bytes)):
+        # bool is an int subclass; True/False as a byte offset is always a mistake.
+        if value is not None and (isinstance(value, bool) or not isinstance(value, int)):
+            raise ValueError(f"{name} must be an integer or None, got {value!r}")
+        if name != "max_bytes" and value is not None and value < 0:
+            raise ValueError(f"{name} must be >= 0, got {value}")
+    if max_bytes is not None and max_bytes <= 0:
+        raise ValueError(f"max_bytes must be a positive integer or None, got {max_bytes}")
+
+    if start is not None or end is not None:
+        eff_start = start if start is not None else 0
+        if end is not None and end < eff_start:
+            raise ValueError(f"end ({end}) must be >= start ({eff_start}).")
+        header = f"bytes={eff_start}-{end}" if end is not None else f"bytes={eff_start}-"
+        return header, eff_start, end
+    if max_bytes is not None:
+        return f"bytes=-{max_bytes}", None, None
+    return None, None, None
+
+
+async def _read_capped_stream(
+    response: httpx.Response,
+    *,
+    reconstruct: Optional[str],
+    ranged: bool,
+    start: Optional[int],
+    end: Optional[int],
+    tail_bytes: Optional[int],
+) -> tuple[bytes, int, bool]:
+    """Read a streamed body without ever holding more than the wanted window.
+
+    ``reconstruct`` is truthy only when a ``Range`` was requested and the server
+    answered 200 anyway — the window then has to be carved out of the full stream
+    client-side. Otherwise the body already *is* the window and is passed through.
+    ``ranged`` says whether a ``Range`` header was sent at all; it only shapes the
+    ceiling error message.
+
+    Returns ``(payload, bytes_consumed, read_to_eof)``. ``read_to_eof`` is False
+    only when bytes were left unread — a window whose ``end`` falls exactly on the
+    last byte still counts as a complete read, so the caller does not report a
+    truncation that did not happen.
+
+    Raises:
+        ValueError: If more than ``MAX_LOG_STREAM_BYTES`` come off the wire.
+    """
+    # An explicit window is carved out by offset; otherwise keep a rolling tail.
+    carve = bool(reconstruct) and (start is not None or end is not None)
+    tail_limit = tail_bytes if (reconstruct and not carve) else None
+    buffer = bytearray()
+    consumed = 0
+    read_to_eof = True
+
+    stream = response.aiter_bytes()
+    async for chunk in stream:
+        chunk_offset = consumed
+        consumed += len(chunk)
+        if consumed > MAX_LOG_STREAM_BYTES:
+            # Blame the right party: the caller's window is only at fault when the
+            # server actually served the range it was given.
+            if reconstruct:
+                cause = "and the server did not honour the requested range"
+            elif ranged:
+                cause = "for the range that was served"
+            else:
+                cause = "and no range was requested"
+            raise ValueError(
+                f"Log exceeds the {MAX_LOG_STREAM_BYTES}-byte streaming ceiling "
+                f"{cause}; narrow the window with the start/end parameters."
+            )
+        if carve:
+            lo = max(0, (start if start is not None else 0) - chunk_offset)
+            hi = len(chunk) if end is None else min(len(chunk), end + 1 - chunk_offset)
+            if hi > lo:
+                buffer += chunk[lo:hi]
+            if end is not None and consumed > end:
+                # Window complete: stop pulling. Exiting the `async with` in the
+                # caller releases the connection instead of leaking it.
+                # Peek one chunk first, so an `end` landing exactly on the last
+                # byte reads as a complete log rather than a spurious "there's more".
+                async for extra in stream:
+                    if extra:
+                        # Deliberately exempt from the ceiling: this is a single
+                        # transport read past a window we already hold in full, and
+                        # aborting here would discard a correct result.
+                        consumed += len(extra)
+                        read_to_eof = False
+                        break
+                break
+        else:
+            buffer += chunk
+            if tail_limit is not None and len(buffer) > tail_limit:
+                del buffer[: len(buffer) - tail_limit]
+
+    return bytes(buffer), consumed, read_to_eof
 
 
 class IssueTrackerDisabledError(Exception):
@@ -1246,26 +1394,121 @@ class BitbucketClient:
         repo_slug: str,
         pipeline_uuid: str,
         step_uuid: str,
-        workspace: Optional[str] = None
-    ) -> str:
+        workspace: Optional[str] = None,
+        log_uuid: Optional[str] = None,
+        start: Optional[int] = None,
+        end: Optional[int] = None,
+        max_bytes: Optional[int] = DEFAULT_MAX_LOG_BYTES,
+    ) -> Dict[str, Any]:
         """
         Get logs for a specific pipeline step.
 
+        This is the only Bitbucket endpoint in this client that does NOT return
+        JSON: it declares ``produces: [application/octet-stream]``, so the
+        client-wide ``Accept: application/json`` header must be overridden per
+        request (it answers 406 otherwise). It also answers 307 once the step is
+        complete — the log is moved to long-term storage — hence
+        ``follow_redirects=True``. httpx strips the ``Authorization`` header on
+        that cross-origin hop by itself, which is what we want: the redirect
+        target is pre-signed and must not receive Bitbucket credentials.
+
+        Raw logs are routinely multi-MB, so the response is bounded: by default
+        only the last ``max_bytes`` are returned (HTTP suffix ``Range``). The body
+        is streamed and never buffered whole, so an unbounded log cannot exhaust
+        memory even when the storage host ignores ``Range`` and replies 200.
+
         Args:
             repo_slug: Repository slug
-            pipeline_uuid: Pipeline UUID
+            pipeline_uuid: Pipeline UUID, e.g. ``{adab6a1f-...}``. Unlike
+                ``get_pipeline_run``, this endpoint is not documented to accept a
+                build number — resolve the UUID first if you only have a number.
             step_uuid: Step UUID
             workspace: Workspace name (defaults to self.workspace)
+            log_uuid: Optional log UUID. Omit for the main build container; pass a
+                service container UUID to read that service's log instead.
+            start: First byte to return (absolute, inclusive)
+            end: Last byte to return (absolute, inclusive). ``start``/``end`` are an
+                absolute byte window, NOT a "last N bytes" convention; ``end`` alone
+                means "from byte 0". An explicit window is honoured verbatim and is
+                never additionally trimmed by ``max_bytes``.
+            max_bytes: Size of the trailing slice returned when no explicit
+                ``start``/``end`` is given (default: 100 KiB). ``None`` returns the
+                whole log, subject to the streaming ceiling.
 
         Returns:
-            Step logs as string
+            Dict with ``content`` (str), ``truncated`` (bool — the content is not
+            the whole log), ``returned_bytes`` and ``total_bytes`` (None when the
+            server did not disclose it and the body was not read to the end).
+
+        Raises:
+            ValueError: On an invalid range, on 416 (requested range not
+                satisfiable), or when the log exceeds the streaming ceiling.
         """
         ws = workspace or self.workspace
-        response = await self.client.get(
-            f"/repositories/{ws}/{repo_slug}/pipelines/{pipeline_uuid}/steps/{step_uuid}/log"
+        range_header, eff_start, eff_end = _build_log_range(start, end, max_bytes)
+
+        path = f"/repositories/{ws}/{repo_slug}/pipelines/{pipeline_uuid}/steps/{step_uuid}"
+        path += f"/logs/{log_uuid}" if log_uuid else "/log"
+
+        # Accept: */* is the actual fix for the 406; Range rides along in the same
+        # per-request dict, leaving the client-wide JSON default untouched.
+        headers = {"Accept": "*/*"}
+        if range_header:
+            headers["Range"] = range_header
+
+        async with self.client.stream(
+            "GET", path, headers=headers, follow_redirects=True
+        ) as response:
+            if response.status_code == httpx.codes.REQUESTED_RANGE_NOT_SATISFIABLE:
+                _, _, total = _parse_content_range(response.headers.get("Content-Range"))
+                size_hint = f" (log is {total} bytes)" if total is not None else ""
+                raise ValueError(
+                    f"Requested range {range_header} is not satisfiable{size_hint}."
+                )
+            if response.status_code >= 400:
+                # Read the (small) error body so raise_for_status reports something useful.
+                await response.aread()
+            response.raise_for_status()
+
+            # 304 is documented by this endpoint but unreachable here: we never send
+            # If-None-Match (no caller-side etag store). Were one added, an empty
+            # 304 body would need distinguishing from a genuinely empty log.
+            cr_start, _, cr_total = _parse_content_range(
+                response.headers.get("Content-Range")
+            )
+            partial = response.status_code == httpx.codes.PARTIAL_CONTENT
+            # A 200 means the server ignored our Range: the window has to be
+            # reconstructed from the full stream instead of trusted as-is.
+            reconstruct = None if partial else range_header
+            raw, consumed, read_to_eof = await _read_capped_stream(
+                response,
+                reconstruct=reconstruct,
+                ranged=bool(range_header),
+                start=eff_start,
+                end=eff_end,
+                tail_bytes=max_bytes,
+            )
+
+        if cr_total is not None:
+            total_bytes = cr_total
+        elif partial or not read_to_eof:
+            # 206 without a numeric total, or a stream we cut short: the full size
+            # is genuinely unknown — do not pass off the bytes read as the total.
+            total_bytes = None
+        else:
+            total_bytes = consumed
+
+        # A 206 whose range starts past byte 0 is partial even if its length
+        # happens to match the total (defensive: servers do disagree here).
+        truncated = (
+            total_bytes is None or len(raw) < total_bytes or bool(cr_start)
         )
-        response.raise_for_status()
-        return response.text
+        return {
+            "content": raw.decode(response.encoding or "utf-8", errors="replace"),
+            "truncated": truncated,
+            "returned_bytes": len(raw),
+            "total_bytes": total_bytes,
+        }
 
     # ========== Pull Request Build Statuses ==========
 

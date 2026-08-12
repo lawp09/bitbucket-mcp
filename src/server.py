@@ -12,7 +12,12 @@ from weakref import WeakKeyDictionary
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 from starlette.responses import JSONResponse
-from .client import BitbucketClient, IssueTrackerDisabledError, DEFAULT_MAX_FILE_BYTES
+from .client import (
+    BitbucketClient,
+    IssueTrackerDisabledError,
+    DEFAULT_MAX_FILE_BYTES,
+    DEFAULT_MAX_LOG_BYTES,
+)
 from .utils.credentials import get_credentials
 from .utils.transformers import (
     slim_repository, slim_repository_list, slim_tag_list,
@@ -1472,23 +1477,48 @@ async def get_pipeline_step_logs(
     repo_slug: str,
     pipeline_uuid: str,
     step_uuid: str,
-    workspace: Optional[str] = None
-) -> str:
+    workspace: Optional[str] = None,
+    log_uuid: Optional[str] = None,
+    start: Optional[int] = None,
+    end: Optional[int] = None,
+    max_bytes: Optional[int] = DEFAULT_MAX_LOG_BYTES,
+) -> Dict[str, Any]:
     """
     Get logs for a specific pipeline step.
 
+    Raw step logs are routinely multi-MB, so only the last `max_bytes` (100 KiB by
+    default) are returned. Check the `truncated` flag in the response and page
+    through the rest with `start`/`end` if you need more.
+
     Args:
         repo_slug: Repository slug
-        pipeline_uuid: Pipeline UUID
-        step_uuid: Step UUID
+        pipeline_uuid: Pipeline UUID, e.g. "{adab6a1f-...}". Unlike get_pipeline_run,
+            this endpoint is not documented to accept a build number — resolve the
+            UUID first via get_pipeline_run if you only have a number.
+        step_uuid: Step UUID (from get_pipeline_steps)
         workspace: Workspace name (optional, defaults to configured workspace)
+        log_uuid: Optional log UUID. Omit for the main build container; pass a
+            service container UUID to read that service's log instead.
+        start: First byte to return (absolute, inclusive)
+        end: Last byte to return (absolute, inclusive). start/end are an absolute
+            byte window, not a "last N bytes" convention.
+        max_bytes: Size of the trailing slice returned when no start/end is given
+            (default: 100 KiB). Pass null for the whole log.
 
     Returns:
-        Step logs as string
+        Dict with the log `content`, whether it was `truncated`, `returned_bytes`
+        and `total_bytes` (null when the server did not disclose the full size)
     """
     client = get_client()
     return await client.get_pipeline_step_logs(
-        repo_slug, pipeline_uuid, step_uuid, workspace
+        repo_slug,
+        pipeline_uuid,
+        step_uuid,
+        workspace,
+        log_uuid=log_uuid,
+        start=start,
+        end=end,
+        max_bytes=max_bytes,
     )
 
 
