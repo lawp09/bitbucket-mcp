@@ -47,6 +47,10 @@ DEFAULT_TOKEN_CACHE_SIZE = 256
 DEFAULT_CLIENT_CACHE_TTL = 900  # seconds
 DEFAULT_CLIENT_CACHE_SIZE = 128
 
+# Minimum delay between two "workspace endpoint is gone" errors (see
+# BitbucketTokenVerifier._log_workspace_endpoint_gone).
+WORKSPACE_GONE_LOG_INTERVAL = 3600  # seconds
+
 
 @dataclass(frozen=True)
 class BitbucketIdentity:
@@ -143,6 +147,9 @@ class BitbucketTokenVerifier:
         # as an LRU: re-inserting on hit moves the entry to the end.
         self._cache: Dict[str, Tuple[float, BitbucketAccessToken]] = {}
         self._inflight: Dict[str, "asyncio.Future[Optional[BitbucketAccessToken]]"] = {}
+        # Last time the "workspace endpoint is gone" error was logged, for throttling.
+        # None = never logged. See _resolve_default_workspace.
+        self._workspace_gone_logged_at: Optional[float] = None
 
     # ----- cache -------------------------------------------------------------
 
@@ -274,6 +281,31 @@ class BitbucketTokenVerifier:
         )
         return access_token
 
+    def _log_workspace_endpoint_gone(self) -> None:
+        """Report a 410 on the workspace listing, at most once an hour.
+
+        A removed endpoint is *our* bug, not a caller permission problem, so it is logged
+        apart from the generic ``>= 400`` fallback — otherwise it reads as "this identity
+        simply has no membership" and nobody investigates.
+
+        Throttled, not once-per-process: the verifier is a process singleton, so a "log
+        once ever" flag would leave an operator with a single line for a degradation
+        lasting weeks — and ``BitbucketClient._resolve_workspace`` does not log the
+        resulting failures either. Throttled, not unbounded: this fires on every cache
+        miss (per token, per TTL), so N tenants would otherwise flood the log at the exact
+        moment the signal matters.
+        """
+        now = time.monotonic()
+        last = self._workspace_gone_logged_at
+        if last is not None and now - last < WORKSPACE_GONE_LOG_INTERVAL:
+            return
+        self._workspace_gone_logged_at = now
+        logger.error(
+            "Workspace listing endpoint returned 410 Gone: it has been retired "
+            "(see Atlassian CHANGE-2770). Callers keep authenticating, but no default "
+            "workspace can be resolved — every tool call must name its workspace."
+        )
+
     async def _resolve_default_workspace(
         self, client: httpx.AsyncClient, headers: Dict[str, str]
     ) -> Optional[str]:
@@ -282,11 +314,20 @@ class BitbucketTokenVerifier:
         Exactly one membership -> that workspace becomes the caller's default, which is
         what makes ``workspace=None`` resolve to *their* workspace rather than the
         process one. Zero or several -> ``None``, and calls must name their workspace.
+
+        Endpoint: ``/user/workspaces``. NOT ``/user/permissions/workspaces`` nor
+        ``/workspaces``, both removed on 2026-04-14 (Atlassian CHANGE-2770, the
+        cross-workspace API sunset) and answering 410 for every caller — verified live.
+        The replacement returns the same ``values[].workspace.slug`` shape and honours
+        ``pagelen`` identically, so only the path differs.
         """
         try:
             response = await client.get(
-                "/user/permissions/workspaces", headers=headers, params={"pagelen": 100}
+                "/user/workspaces", headers=headers, params={"pagelen": 100}
             )
+            if response.status_code == 410:
+                self._log_workspace_endpoint_gone()
+                return None
             if response.status_code >= 400:
                 return None
             values = response.json().get("values", []) or []
