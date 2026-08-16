@@ -1,5 +1,10 @@
 # Changelog - Bitbucket MCP Server Python
 
+## [Unreleased]
+
+### Changed
+- **`CLAUDE.md` slimmed from 326 to 166 lines** (~6,500 → ~1,500 tokens loaded every session, against an official guideline of 200 lines) with the detail moved to a new `docs/` directory: tools reference, tool configuration, pagination, client setup, architecture, deployment and key files. The "Recent Changes" section was dropped — `CHANGELOG.md` already carries that history, verified entry by entry, including the API gotchas that were the only reason to keep it. Documentation only: no code, config or behaviour changes.
+
 ## [1.26.0] - 2026-08-12
 
 ### Added
