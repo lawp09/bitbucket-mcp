@@ -597,3 +597,70 @@ async def test_server_tool_defaults_to_tail():
     kwargs = mock_client.get_pipeline_step_logs.await_args.kwargs
     assert kwargs["max_bytes"] == DEFAULT_MAX_LOG_BYTES
     assert kwargs["log_uuid"] is None
+
+
+# ========== Bearer (multi-tenant) clients on the streaming path (#72) ==========
+#
+# get_pipeline_step_logs is the only method combining a bearer client's 401/403 response
+# hook with `client.stream(...)` and `follow_redirects=True`. The hook runs once per
+# response leg, inside _send_handling_redirects, before stream() yields — so it must not
+# disturb the 307 follow, the streamed body, or the expected 416.
+
+
+@pytest.fixture
+def bearer_client():
+    """A multi-tenant client: bearer auth + the 401/403 -> AuthorizationError hook."""
+    return BitbucketClient.from_bearer("bearer-token-abc", WORKSPACE, account_id="account-a")
+
+
+@pytest.mark.asyncio
+async def test_bearer_client_follows_the_307_and_streams(bearer_client):
+    """The auth hook must not break the redirect or the streamed body."""
+    with respx.mock:
+        respx.get(LOG_URL).mock(
+            return_value=httpx.Response(307, headers={"Location": STORAGE_URL})
+        )
+        respx.get(STORAGE_URL).mock(
+            return_value=httpx.Response(200, content=b"archived log body")
+        )
+        result = await _get_logs(bearer_client)
+
+    assert result["content"] == "archived log body"
+    assert result["truncated"] is False
+
+
+@pytest.mark.asyncio
+async def test_bearer_client_maps_403_on_the_log_endpoint(bearer_client):
+    """A 403 on the streaming path surfaces as AuthorizationError, without the token."""
+    from src.client import AuthorizationError
+
+    with respx.mock:
+        respx.get(LOG_URL).mock(return_value=httpx.Response(403, json={}))
+        with pytest.raises(AuthorizationError) as exc:
+            await _get_logs(bearer_client)
+
+    assert exc.value.status_code == 403
+    assert "bearer-token-abc" not in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_bearer_client_still_reports_an_unsatisfiable_range(bearer_client):
+    """416 is a legitimate outcome here and must not be swallowed by the auth hook."""
+    with respx.mock:
+        respx.get(LOG_URL).mock(
+            return_value=httpx.Response(416, headers={"Content-Range": "bytes */120"})
+        )
+        with pytest.raises(ValueError, match="not satisfiable"):
+            await _get_logs(bearer_client, start=500, end=900)
+
+
+@pytest.mark.asyncio
+async def test_bearer_client_sends_bearer_and_wildcard_accept(bearer_client):
+    """Both the per-request Accept override and the bearer scheme reach the wire."""
+    with respx.mock:
+        route = respx.get(LOG_URL).mock(return_value=httpx.Response(200, content=b"log"))
+        await _get_logs(bearer_client)
+
+    request = route.calls[0].request
+    assert request.headers["Accept"] == "*/*"
+    assert request.headers["Authorization"] == "Bearer bearer-token-abc"

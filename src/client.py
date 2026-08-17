@@ -4,7 +4,7 @@ import base64
 import logging
 import re
 import urllib.parse
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Protocol
 import httpx
 
 from .utils.pagination import PaginationConfig, aggregate_pages
@@ -196,6 +196,52 @@ async def _read_capped_stream(
     return bytes(buffer), consumed, read_to_eof
 
 
+class AuthorizationError(Exception):
+    """Raised when a call cannot be authorized for the current caller.
+
+    Covers three distinct situations, all of which must surface to the MCP layer as a
+    clear, structured error rather than a raw HTTP failure:
+
+    - multi-tenant mode is active but the request carries no verified Bitbucket identity;
+    - the caller's identity resolves to no default workspace and none was passed;
+    - Bitbucket answered 401/403 for a bearer-authenticated (multi-tenant) call.
+
+    The message never contains a token: only the account id, the workspace and the HTTP
+    status. Mirrors the ``IssueTrackerDisabledError`` convention (typed exception ->
+    structured response) already used by the server layer.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        account_id: Optional[str] = None,
+        workspace: Optional[str] = None,
+        status_code: Optional[int] = None,
+    ):
+        self.account_id = account_id
+        self.workspace = workspace
+        self.status_code = status_code
+        super().__init__(message)
+
+
+async def _raise_authorization_error(response: httpx.Response) -> None:
+    """httpx response hook: turn a 401/403 into a typed :class:`AuthorizationError`.
+
+    Installed on bearer (multi-tenant) clients only. The message carries the method, the
+    path and the status — never the ``Authorization`` header, and never the token.
+    """
+    if response.status_code not in (401, 403):
+        return
+    request = response.request
+    raise AuthorizationError(
+        f"Bitbucket refused the request ({response.status_code}) for "
+        f"{request.method} {request.url.path}. The caller's token is missing the "
+        f"required scope, or is expired or revoked.",
+        status_code=response.status_code,
+    )
+
+
 class IssueTrackerDisabledError(Exception):
     """Raised when an issue endpoint returns 404 because the repository's issue
     tracker is disabled.
@@ -285,46 +331,181 @@ def _build_issue_query(
     return " AND ".join(clauses) if clauses else None
 
 
+class AuthStrategy(Protocol):
+    """How a client authenticates against the Bitbucket API.
+
+    Injectable so the same client serves the single-user Basic-Auth deployment and the
+    multi-tenant bearer deployment (issue #72) without either knowing about the other.
+    """
+
+    scheme: str
+
+    def header(self) -> str:
+        """Return the full value of the ``Authorization`` header."""
+        ...  # pragma: no cover - Protocol stub
+
+
+class BasicAuthStrategy:
+    """``Authorization: Basic base64(email:token)`` — the historical scheme.
+
+    Uses an Atlassian API token bound to the process, resolved once at startup from the
+    environment or the system keychain.
+    """
+
+    scheme = "Basic"
+
+    def __init__(self, email: str, token: str):
+        self._email = email
+        self._token = token
+
+    def header(self) -> str:
+        auth_b64 = base64.b64encode(f"{self._email}:{self._token}".encode("utf-8")).decode("utf-8")
+        return f"Basic {auth_b64}"
+
+    def __repr__(self) -> str:
+        """Never render the credentials — this object is reachable from tracebacks."""
+        return "BasicAuthStrategy(email=<redacted>, token=<redacted>)"
+
+
+class BearerAuthStrategy:
+    """``Authorization: Bearer <token>`` — a Bitbucket OAuth 2.0 access token.
+
+    Used in multi-tenant HTTP mode: the token presented by the MCP client *is* the
+    caller's Bitbucket credential, reused as-is so the server never stores or maps
+    credentials of its own.
+    """
+
+    scheme = "Bearer"
+
+    def __init__(self, token: str):
+        self._token = token
+
+    def header(self) -> str:
+        return f"Bearer {self._token}"
+
+    def __repr__(self) -> str:
+        """Never render the token — this object is reachable from tracebacks."""
+        return "BearerAuthStrategy(token=<redacted>)"
+
+
 class BitbucketClient:
-    """Async HTTP client for Bitbucket API 2.0 with Basic Auth"""
+    """Async HTTP client for Bitbucket API 2.0.
+
+    Authenticates through an injectable :class:`AuthStrategy`: Basic Auth by default
+    (single-user deployments), Bearer via :meth:`from_bearer` (multi-tenant HTTP).
+    """
 
     def __init__(self, email: str, token: str, workspace: str):
         """
         Initialize Bitbucket client with Basic Auth.
+
+        Public constructor, kept signature-compatible on purpose: it is part of the
+        package's public surface and is used throughout ``tests/``.
 
         Args:
             email: Bitbucket account email
             token: Bitbucket API token
             workspace: Bitbucket workspace name
         """
+        self._init_common(BasicAuthStrategy(email, token), workspace)
+
+    @classmethod
+    def from_bearer(
+        cls,
+        token: str,
+        workspace: Optional[str],
+        *,
+        account_id: Optional[str] = None,
+    ) -> "BitbucketClient":
+        """Build a client authenticating with a Bitbucket OAuth bearer token.
+
+        Args:
+            token: Bitbucket access token, used as-is as the bearer credential.
+            workspace: Default workspace for this identity. May be ``None`` when the
+                identity has zero or several workspace memberships — every call must
+                then pass ``workspace`` explicitly (see :meth:`_resolve_workspace`).
+            account_id: Bitbucket account id of the caller, for logs and errors. Never
+                a credential.
+
+        Returns:
+            A client whose 401/403 responses surface as :class:`AuthorizationError`.
+        """
+        client = cls.__new__(cls)
+        client._init_common(BearerAuthStrategy(token), workspace, account_id=account_id)
+        return client
+
+    def _init_common(
+        self,
+        auth: AuthStrategy,
+        workspace: Optional[str],
+        *,
+        account_id: Optional[str] = None,
+    ) -> None:
+        """Shared construction path for both auth schemes."""
         self.workspace = workspace
+        self.account_id = account_id
+        self.auth_scheme = auth.scheme
         self.base_url = "https://api.bitbucket.org/2.0"
 
-        # Create Basic Auth header: Authorization: Basic base64(email:token)
-        auth_str = f"{email}:{token}"
-        auth_bytes = auth_str.encode('utf-8')
-        auth_b64 = base64.b64encode(auth_bytes).decode('utf-8')
+        # Lifecycle bookkeeping used by the server's bounded per-identity client cache
+        # (issue #72): a client evicted from the LRU while a request is still using it
+        # must not be closed under that request's feet.
+        self._inflight = 0
+        self._retired = False
+        self._closed = False
+
+        # 401/403 -> AuthorizationError, but only for bearer clients: in single-user
+        # Basic-Auth mode a 403 is a legitimate, documented outcome for some endpoints
+        # (e.g. get_pipeline_config without admin:repository) and callers already handle
+        # it as an httpx.HTTPStatusError. Multi-tenant mode has no such history.
+        event_hooks = {"response": [_raise_authorization_error]} if auth.scheme == "Bearer" else {}
 
         self.client = httpx.AsyncClient(
             base_url=self.base_url,
             headers={
-                "Authorization": f"Basic {auth_b64}",
+                "Authorization": auth.header(),
                 "Content-Type": "application/json",
                 "Accept": "application/json"
             },
             timeout=30.0,
-            trust_env=False  # Disable proxy from environment for testing
+            trust_env=False,  # Disable proxy from environment for testing
+            event_hooks=event_hooks,
         )
 
-        logger.info(f"Bitbucket client initialized for workspace: {workspace}")
+        logger.info(
+            f"Bitbucket client initialized for workspace: {workspace} "
+            f"(auth={auth.scheme})"
+        )
+
+    def _resolve_workspace(self, workspace: Optional[str]) -> str:
+        """Resolve the workspace for a call: explicit argument, else this client's default.
+
+        In multi-tenant mode ``self.workspace`` is the *caller's* workspace, never the
+        process one — the per-identity client is what makes ``workspace=None`` safe. When
+        the identity resolves to no default workspace (zero or several memberships), fail
+        loudly here rather than building a ``/repositories/None/...`` URL.
+        """
+        ws = workspace or self.workspace
+        if not ws:
+            raise AuthorizationError(
+                "No default workspace for this identity: pass `workspace` explicitly.",
+                account_id=self.account_id,
+            )
+        return ws
 
     async def close(self):
-        """Close the HTTP client"""
+        """Close the HTTP client. Idempotent — safe to call from several cleanup paths."""
+        if self._closed:
+            return
+        self._closed = True
         await self.client.aclose()
 
     def __repr__(self) -> str:
         """Protected repr to avoid credential leaks in logs/debug."""
-        return f"BitbucketClient(workspace={self.workspace!r})"
+        return (
+            f"BitbucketClient(workspace={self.workspace!r}, auth={self.auth_scheme!r}, "
+            f"account_id={self.account_id!r})"
+        )
 
     async def __aenter__(self):
         return self
@@ -370,7 +551,7 @@ class BitbucketClient:
         Returns:
             Paginated list of repositories with aggregated values
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         config = PaginationConfig(page_size=limit, max_pages=max_pages)
         params = {}
         if name:
@@ -393,7 +574,7 @@ class BitbucketClient:
         Returns:
             Repository information
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         response = await self.client.get(f"/repositories/{ws}/{repo_slug}")
         response.raise_for_status()
         return response.json()
@@ -417,7 +598,7 @@ class BitbucketClient:
         Returns:
             Paginated list of repository tags with aggregated values
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         config = PaginationConfig(page_size=page_size, max_pages=max_pages)
         params = {"sort": "-target.date"}
 
@@ -451,7 +632,7 @@ class BitbucketClient:
         Returns:
             Paginated list of pull requests with aggregated values
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         config = PaginationConfig(page_size=limit, max_pages=max_pages)
         params = {"state": state}
 
@@ -479,7 +660,7 @@ class BitbucketClient:
         Returns:
             Pull request details
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         response = await self.client.get(
             f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}"
         )
@@ -518,7 +699,7 @@ class BitbucketClient:
         Returns:
             Created pull request details
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
 
         payload: Dict[str, Any] = {
             "title": title,
@@ -563,7 +744,7 @@ class BitbucketClient:
         Returns:
             Updated pull request details
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
 
         payload = {}
         if title:
@@ -597,7 +778,7 @@ class BitbucketClient:
         Returns:
             Approval details
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         response = await self.client.post(
             f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}/approve",
             json={}  # Body vide requis par l'API Bitbucket
@@ -619,7 +800,7 @@ class BitbucketClient:
             pull_request_id: Pull request ID
             workspace: Workspace name (defaults to self.workspace)
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         response = await self.client.delete(
             f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}/approve"
         )
@@ -642,7 +823,7 @@ class BitbucketClient:
         Returns:
             Participant details with updated state
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         response = await self.client.post(
             f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}/request-changes",
             json={}
@@ -664,7 +845,7 @@ class BitbucketClient:
             pull_request_id: Pull request ID
             workspace: Workspace name (defaults to self.workspace)
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         response = await self.client.delete(
             f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}/request-changes"
         )
@@ -689,7 +870,7 @@ class BitbucketClient:
         Returns:
             Updated pull request details
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
 
         payload = {}
         if message:
@@ -723,7 +904,7 @@ class BitbucketClient:
         Returns:
             Merged pull request details
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
 
         payload = {"merge_strategy": strategy}
         if message:
@@ -761,7 +942,7 @@ class BitbucketClient:
         Returns:
             Comments with aggregated values, including resolution field
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         config = PaginationConfig(page_size=page_size, max_pages=max_pages)
         params = {}
 
@@ -801,7 +982,7 @@ class BitbucketClient:
         Returns:
             Created comment details
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
 
         payload: Dict[str, Any] = {
             "content": {"raw": content}
@@ -847,7 +1028,7 @@ class BitbucketClient:
         Returns:
             Comment details
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         response = await self.client.get(
             f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}/comments/{comment_id}"
         )
@@ -875,7 +1056,7 @@ class BitbucketClient:
         Returns:
             Updated comment details
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         response = await self.client.put(
             f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}/comments/{comment_id}",
             json={"content": {"raw": content}}
@@ -899,7 +1080,7 @@ class BitbucketClient:
             comment_id: Comment ID
             workspace: Workspace name (defaults to self.workspace)
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         response = await self.client.delete(
             f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}/comments/{comment_id}"
         )
@@ -924,7 +1105,7 @@ class BitbucketClient:
         Returns:
             Resolution details
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         response = await self.client.post(
             f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}/comments/{comment_id}/resolve",
             json={}
@@ -948,7 +1129,7 @@ class BitbucketClient:
             comment_id: Comment ID
             workspace: Workspace name (defaults to self.workspace)
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         response = await self.client.delete(
             f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}/comments/{comment_id}/resolve"
         )
@@ -977,7 +1158,7 @@ class BitbucketClient:
         Returns:
             Paginated list of tasks
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         config = PaginationConfig(page_size=page_size, max_pages=max_pages)
         return await aggregate_pages(
             self.client,
@@ -1005,7 +1186,7 @@ class BitbucketClient:
         Returns:
             Task object from Bitbucket API
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         response = await self.client.get(
             f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}/tasks/{task_id}"
         )
@@ -1033,7 +1214,7 @@ class BitbucketClient:
         Returns:
             Created task object
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         payload = {
             "content": {"raw": content},
             "state": "UNRESOLVED"
@@ -1070,7 +1251,7 @@ class BitbucketClient:
         Returns:
             Updated task object
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         payload: Dict[str, Any] = {}
         if content is not None:
             payload["content"] = {"raw": content}
@@ -1099,7 +1280,7 @@ class BitbucketClient:
             task_id: Task ID
             workspace: Workspace name (defaults to self.workspace)
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         response = await self.client.delete(
             f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}/tasks/{task_id}"
         )
@@ -1124,7 +1305,7 @@ class BitbucketClient:
         Returns:
             Dictionary with patch content as string
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         response = await self.client.get(
             f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}/patch",
             follow_redirects=True
@@ -1153,7 +1334,7 @@ class BitbucketClient:
         Returns:
             Paginated list of pull requests pending review
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         config = PaginationConfig(page_size=page_size, max_pages=max_pages)
         params = {"state": "OPEN", "role": "REVIEWER"}
         return await aggregate_pages(
@@ -1182,7 +1363,7 @@ class BitbucketClient:
         Returns:
             Unified diff as string
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         params = {}
         if path:
             params["path"] = path
@@ -1216,7 +1397,7 @@ class BitbucketClient:
             Activity log with aggregated values. Comment objects include the resolution field
             showing resolution status (null for unresolved comments, or resolution object with user and timestamp).
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         config = PaginationConfig(page_size=page_size, max_pages=max_pages)
         return await aggregate_pages(
             self.client,
@@ -1285,7 +1466,7 @@ class BitbucketClient:
         Returns:
             Commits with aggregated values
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         config = PaginationConfig(page_size=page_size, max_pages=max_pages)
         return await aggregate_pages(
             self.client,
@@ -1319,7 +1500,7 @@ class BitbucketClient:
         Returns:
             List of pipeline runs with aggregated values
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         config = PaginationConfig(page_size=limit, max_pages=max_pages)
         params = {}
 
@@ -1352,7 +1533,7 @@ class BitbucketClient:
         Returns:
             Pipeline run details
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         response = await self.client.get(
             f"/repositories/{ws}/{repo_slug}/pipelines/{pipeline_uuid}"
         )
@@ -1380,7 +1561,7 @@ class BitbucketClient:
         Returns:
             Pipeline steps with aggregated values
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         config = PaginationConfig(page_size=page_size, max_pages=max_pages)
         return await aggregate_pages(
             self.client,
@@ -1444,7 +1625,7 @@ class BitbucketClient:
             ValueError: On an invalid range, on 416 (requested range not
                 satisfiable), or when the log exceeds the streaming ceiling.
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         range_header, eff_start, eff_end = _build_log_range(start, end, max_bytes)
 
         path = f"/repositories/{ws}/{repo_slug}/pipelines/{pipeline_uuid}/steps/{step_uuid}"
@@ -1539,7 +1720,7 @@ class BitbucketClient:
             - url: Link to the build details
             - created_on: Timestamp of the status
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         config = PaginationConfig(page_size=page_size, max_pages=max_pages)
         return await aggregate_pages(
             self.client,
@@ -1577,7 +1758,7 @@ class BitbucketClient:
             - url: Link to the build details
             - created_on: Timestamp of the status
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         config = PaginationConfig(page_size=page_size, max_pages=max_pages)
         return await aggregate_pages(
             self.client,
@@ -1603,7 +1784,7 @@ class BitbucketClient:
         Returns:
             Created pipeline run details
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         payload = {
             "target": {
                 "ref_type": "branch",
@@ -1632,7 +1813,7 @@ class BitbucketClient:
             pipeline_uuid: Pipeline UUID
             workspace: Workspace name (defaults to self.workspace)
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         response = await self.client.post(
             f"/repositories/{ws}/{repo_slug}/pipelines/{pipeline_uuid}/stopPipeline",
             json={}
@@ -1664,7 +1845,7 @@ class BitbucketClient:
         Returns:
             Pipelines configuration object
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         response = await self.client.get(
             f"/repositories/{ws}/{repo_slug}/pipelines_config"
         )
@@ -1692,7 +1873,7 @@ class BitbucketClient:
         Returns:
             Paginated list of pipeline variables
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         config = PaginationConfig(page_size=page_size, max_pages=max_pages)
         return await aggregate_pages(
             self.client,
@@ -1718,7 +1899,7 @@ class BitbucketClient:
         Returns:
             Pipeline variable (no value if secured)
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         response = await self.client.get(
             f"/repositories/{ws}/{repo_slug}/pipelines_config/variables/{variable_uuid}"
         )
@@ -1746,7 +1927,7 @@ class BitbucketClient:
         Returns:
             Created variable
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         payload = {"key": key, "value": value, "secured": secured}
         response = await self.client.post(
             f"/repositories/{ws}/{repo_slug}/pipelines_config/variables",
@@ -1778,7 +1959,7 @@ class BitbucketClient:
         Returns:
             Updated variable
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         payload: Dict[str, Any] = {}
         if key is not None:
             payload["key"] = key
@@ -1811,7 +1992,7 @@ class BitbucketClient:
             variable_uuid: Variable UUID
             workspace: Workspace name (defaults to self.workspace)
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         response = await self.client.delete(
             f"/repositories/{ws}/{repo_slug}/pipelines_config/variables/{variable_uuid}"
         )
@@ -1836,7 +2017,7 @@ class BitbucketClient:
         Returns:
             Paginated list of pipeline schedules
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         config = PaginationConfig(page_size=page_size, max_pages=max_pages)
         return await aggregate_pages(
             self.client,
@@ -1862,7 +2043,7 @@ class BitbucketClient:
         Returns:
             Pipeline schedule
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         response = await self.client.get(
             f"/repositories/{ws}/{repo_slug}/pipelines_config/schedules/{schedule_uuid}"
         )
@@ -1890,7 +2071,7 @@ class BitbucketClient:
         Returns:
             Paginated list of schedule executions
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         config = PaginationConfig(page_size=page_size, max_pages=max_pages)
         return await aggregate_pages(
             self.client,
@@ -1922,7 +2103,7 @@ class BitbucketClient:
         Returns:
             Created schedule
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         payload = {
             "type": "pipeline_schedule",
             "enabled": enabled,
@@ -1965,7 +2146,7 @@ class BitbucketClient:
         Returns:
             Updated schedule
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         payload: Dict[str, Any] = {}
         if enabled is not None:
             payload["enabled"] = enabled
@@ -1996,7 +2177,7 @@ class BitbucketClient:
             schedule_uuid: Schedule UUID
             workspace: Workspace name (defaults to self.workspace)
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         response = await self.client.delete(
             f"/repositories/{ws}/{repo_slug}/pipelines_config/schedules/{schedule_uuid}"
         )
@@ -2023,7 +2204,7 @@ class BitbucketClient:
         Returns:
             Paginated list of pipeline caches
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         config = PaginationConfig(page_size=page_size, max_pages=max_pages)
         return await aggregate_pages(
             self.client,
@@ -2048,7 +2229,7 @@ class BitbucketClient:
             cache_uuid: Cache UUID
             workspace: Workspace name (defaults to self.workspace)
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         response = await self.client.delete(
             f"/repositories/{ws}/{repo_slug}/pipelines-config/caches/{cache_uuid}"
         )
@@ -2075,7 +2256,7 @@ class BitbucketClient:
         Returns:
             Paginated list of default reviewers
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         config = PaginationConfig(page_size=page_size, max_pages=max_pages)
         return await aggregate_pages(
             self.client,
@@ -2113,7 +2294,7 @@ class BitbucketClient:
             - lines_removed: Number of lines removed
             - new.path: File path after changes
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         config = PaginationConfig(page_size=page_size, max_pages=max_pages)
 
         # Use provided pr_data or fetch it
@@ -2158,7 +2339,7 @@ class BitbucketClient:
         Returns:
             Updated pull request details
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         response = await self.client.put(
             f"/repositories/{ws}/{repo_slug}/pullrequests/{pull_request_id}",
             json={"draft": False}
@@ -2205,7 +2386,7 @@ class BitbucketClient:
         Raises:
             IssueTrackerDisabledError: If the repository has no issue tracker enabled
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         config = PaginationConfig(
             page_size=page_size, max_pages=max_pages, max_items=max_items
         )
@@ -2245,7 +2426,7 @@ class BitbucketClient:
         Raises:
             IssueTrackerDisabledError: If the repository has no issue tracker enabled
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         response = await self.client.get(
             f"/repositories/{ws}/{repo_slug}/issues/{issue_id}"
         )
@@ -2283,7 +2464,7 @@ class BitbucketClient:
         Raises:
             IssueTrackerDisabledError: If the repository has no issue tracker enabled
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         payload: Dict[str, Any] = {"title": title}
         if content is not None:
             payload["content"] = {"raw": content}
@@ -2335,7 +2516,7 @@ class BitbucketClient:
         Raises:
             IssueTrackerDisabledError: If the repository has no issue tracker enabled
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         payload: Dict[str, Any] = {}
         if title is not None:
             payload["title"] = title
@@ -2374,7 +2555,7 @@ class BitbucketClient:
         Raises:
             IssueTrackerDisabledError: If the repository has no issue tracker enabled
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         response = await self.client.delete(
             f"/repositories/{ws}/{repo_slug}/issues/{issue_id}"
         )
@@ -2407,7 +2588,7 @@ class BitbucketClient:
         Raises:
             IssueTrackerDisabledError: If the repository has no issue tracker enabled
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         config = PaginationConfig(
             page_size=page_size, max_pages=max_pages, max_items=max_items
         )
@@ -2445,7 +2626,7 @@ class BitbucketClient:
         Raises:
             IssueTrackerDisabledError: If the repository has no issue tracker enabled
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         response = await self.client.get(
             f"/repositories/{ws}/{repo_slug}/issues/{issue_id}/comments/{comment_id}"
         )
@@ -2475,7 +2656,7 @@ class BitbucketClient:
         Raises:
             IssueTrackerDisabledError: If the repository has no issue tracker enabled
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         response = await self.client.post(
             f"/repositories/{ws}/{repo_slug}/issues/{issue_id}/comments",
             json={"content": {"raw": content}},
@@ -2508,7 +2689,7 @@ class BitbucketClient:
         Raises:
             IssueTrackerDisabledError: If the repository has no issue tracker enabled
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         response = await self.client.put(
             f"/repositories/{ws}/{repo_slug}/issues/{issue_id}/comments/{comment_id}",
             json={"content": {"raw": content}},
@@ -2536,7 +2717,7 @@ class BitbucketClient:
         Raises:
             IssueTrackerDisabledError: If the repository has no issue tracker enabled
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         response = await self.client.delete(
             f"/repositories/{ws}/{repo_slug}/issues/{issue_id}/comments/{comment_id}"
         )
@@ -2574,7 +2755,7 @@ class BitbucketClient:
         Returns:
             Paginated list of commits with aggregated values
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         config = PaginationConfig(page_size=page_size, max_pages=max_pages)
         if revision:
             url = f"/repositories/{ws}/{repo_slug}/commits/{revision}"
@@ -2606,7 +2787,7 @@ class BitbucketClient:
         Returns:
             Commit details
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         response = await self.client.get(
             f"/repositories/{ws}/{repo_slug}/commit/{commit}"
         )
@@ -2634,7 +2815,7 @@ class BitbucketClient:
         Returns:
             Comments with aggregated values
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         config = PaginationConfig(page_size=page_size, max_pages=max_pages)
         return await aggregate_pages(
             self.client,
@@ -2662,7 +2843,7 @@ class BitbucketClient:
         Returns:
             Comment details
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         response = await self.client.get(
             f"/repositories/{ws}/{repo_slug}/commit/{commit}/comments/{comment_id}"
         )
@@ -2694,7 +2875,7 @@ class BitbucketClient:
         Returns:
             Created comment details
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         if not inline_path and (inline_from is not None or inline_to is not None):
             raise ValueError(
                 "inline_path is required when inline_from/inline_to is provided."
@@ -2728,7 +2909,7 @@ class BitbucketClient:
         Parent-directory segments ('..') are rejected: ``quote`` leaves dots intact,
         so an unchecked '..' could let the request escape the target ``repo_slug``.
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         clean = (path or "").lstrip("/")
         if any(segment == ".." for segment in clean.split("/")):
             raise ValueError(
@@ -2897,7 +3078,7 @@ class BitbucketClient:
         Returns:
             Paginated list of environments
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         config = PaginationConfig(page_size=page_size, max_pages=max_pages)
         return await aggregate_pages(
             self.client,
@@ -2923,7 +3104,7 @@ class BitbucketClient:
         Returns:
             Environment object
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         response = await self.client.get(
             f"/repositories/{ws}/{repo_slug}/environments/{environment_uuid}"
         )
@@ -2949,7 +3130,7 @@ class BitbucketClient:
         Returns:
             Created environment
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         payload = {"name": name, "environment_type": {"name": environment_type}}
         response = await self.client.post(
             f"/repositories/{ws}/{repo_slug}/environments/",
@@ -2972,7 +3153,7 @@ class BitbucketClient:
             environment_uuid: Environment UUID
             workspace: Workspace name (defaults to self.workspace)
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         response = await self.client.delete(
             f"/repositories/{ws}/{repo_slug}/environments/{environment_uuid}"
         )
@@ -3000,7 +3181,7 @@ class BitbucketClient:
         Returns:
             Paginated list of deployments
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         config = PaginationConfig(page_size=page_size, max_pages=max_pages)
         return await aggregate_pages(
             self.client,
@@ -3026,7 +3207,7 @@ class BitbucketClient:
         Returns:
             Deployment object
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         response = await self.client.get(
             f"/repositories/{ws}/{repo_slug}/deployments/{deployment_uuid}"
         )
@@ -3056,7 +3237,7 @@ class BitbucketClient:
         Returns:
             Paginated list of deployment variables
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         config = PaginationConfig(page_size=page_size, max_pages=max_pages)
         return await aggregate_pages(
             self.client,
@@ -3088,7 +3269,7 @@ class BitbucketClient:
         Returns:
             Created variable (no value if secured)
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         payload = {"key": key, "value": value, "secured": secured}
         response = await self.client.post(
             f"/repositories/{ws}/{repo_slug}/deployments_config/environments/{environment_uuid}/variables",
@@ -3122,7 +3303,7 @@ class BitbucketClient:
         Returns:
             Updated variable (no value if secured)
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         payload: Dict[str, Any] = {}
         if key is not None:
             payload["key"] = key
@@ -3157,7 +3338,7 @@ class BitbucketClient:
             variable_uuid: Variable UUID
             workspace: Workspace name (defaults to self.workspace)
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         response = await self.client.delete(
             f"/repositories/{ws}/{repo_slug}/deployments_config/environments/{environment_uuid}/variables/{variable_uuid}"
         )
@@ -3199,7 +3380,7 @@ class BitbucketClient:
         Returns:
             Paginated list of branch restrictions
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         config = PaginationConfig(page_size=page_size, max_pages=max_pages)
         params = {"kind": kind} if kind else {}
         return await aggregate_pages(
@@ -3226,7 +3407,7 @@ class BitbucketClient:
         Returns:
             Branch restriction object
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         response = await self.client.get(
             f"/repositories/{ws}/{repo_slug}/branch-restrictions/{restriction_id}"
         )
@@ -3259,7 +3440,7 @@ class BitbucketClient:
         Returns:
             Created branch restriction
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         payload: Dict[str, Any] = {"kind": kind, "pattern": pattern}
         if value is not None:
             payload["value"] = value
@@ -3311,7 +3492,7 @@ class BitbucketClient:
             raise ValueError(
                 "update_branch_restriction requires 'kind' (the Bitbucket PUT API mandates it)."
             )
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         payload: Dict[str, Any] = {"kind": kind}
         if pattern is not None:
             payload["pattern"] = pattern
@@ -3342,7 +3523,7 @@ class BitbucketClient:
             restriction_id: Numeric restriction id
             workspace: Workspace name (defaults to self.workspace)
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         response = await self.client.delete(
             f"/repositories/{ws}/{repo_slug}/branch-restrictions/{restriction_id}"
         )
@@ -3368,7 +3549,7 @@ class BitbucketClient:
         Returns:
             Paginated list of workspace memberships
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         config = PaginationConfig(page_size=page_size, max_pages=max_pages)
         return await aggregate_pages(
             self.client,
@@ -3392,7 +3573,7 @@ class BitbucketClient:
         Returns:
             Workspace membership object
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         response = await self.client.get(
             f"/workspaces/{ws}/members/{member_id}"
         )
@@ -3416,7 +3597,7 @@ class BitbucketClient:
         Returns:
             Paginated list of workspace permissions (permission + user)
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         config = PaginationConfig(page_size=page_size, max_pages=max_pages)
         return await aggregate_pages(
             self.client,
@@ -3444,7 +3625,7 @@ class BitbucketClient:
         Returns:
             Paginated list of repository permissions (permission + user)
         """
-        ws = workspace or self.workspace
+        ws = self._resolve_workspace(workspace)
         config = PaginationConfig(page_size=page_size, max_pages=max_pages)
         return await aggregate_pages(
             self.client,

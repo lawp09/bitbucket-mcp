@@ -286,7 +286,7 @@ python -m src.main --transport http --host 0.0.0.0 --port 8080
 python -m src.main --transport http --host 0.0.0.0 --port 8080 --stateless
 ```
 
-> ⚠️ **Single-tenant only.** The server serves *its own* process-wide Bitbucket token to every caller. Deploy it on a private network or behind an authenticated reverse proxy. Per-request credentials (multi-tenant) are tracked in [#72](https://github.com/lawp09/bitbucket-mcp/issues/72).
+> ⚠️ **Single-tenant by default.** Without `--multi-tenant` the server serves *its own* process-wide Bitbucket token to every caller. Deploy it on a private network or behind an authenticated reverse proxy — or use [multi-tenant mode](#multi-tenant-http-per-request-credentials), where each caller brings their own credentials.
 
 `--stateless` requires `--transport http` (it is rejected on `stdio` and on the legacy `sse`, whose app ignores the setting). It also forces a **single JSON response** instead of an SSE stream, because edge/serverless runtimes cannot hold a streaming response open — there is currently no way to combine stateless with streaming.
 
@@ -319,6 +319,39 @@ export BITBUCKET_ALLOWED_ORIGINS="https://app.example.com"
 ```
 
 > With neither allowlist set, no DNS-rebinding protection is applied — appropriate for a server reached through a private network or a trusted proxy. Set them as soon as the server is exposed on a real hostname.
+
+#### Multi-tenant HTTP (per-request credentials)
+
+By default an HTTP deployment is **single-tenant**: every caller acts with the process-wide Bitbucket token. `--multi-tenant` changes that — each request carries the **caller's own Bitbucket OAuth access token** as `Authorization: Bearer`, and runs under that identity. The server holds no Bitbucket credential of its own.
+
+```bash
+BITBUCKET_RESOURCE_SERVER_URL=https://mcp.example.com \
+  python -m src.main --transport http --host 0.0.0.0 --port 8080 --stateless --multi-tenant
+```
+
+The token is verified against `GET /2.0/user`, which yields the caller's `account_id` and default workspace; the same token is then reused for the downstream API calls, so no credential is ever stored or mapped. Unauthenticated requests get a `401` with a `WWW-Authenticate` challenge pointing at `/.well-known/oauth-protected-resource`.
+
+What this buys you:
+
+- **Isolation** — one Bitbucket client per `(identity, workspace)`; two callers never share one, and there is no process token to fall back on.
+- **`workspace=None` means *your* workspace** — resolved from the caller's memberships, never from `BITBUCKET_WORKSPACE`. With zero or several memberships there is no default and calls must name their workspace.
+- **Audit trail** — every call is logged to the `bitbucket_mcp.audit` logger with the tool, the `account_id` and the workspace. Never credentials.
+- **Tighter defaults** — tools flagged `destructiveHint` are refused unless explicitly enabled.
+
+| Environment variable | Default | Purpose |
+|---|---|---|
+| `BITBUCKET_RESOURCE_SERVER_URL` | *(required)* | This server's public URL — the OAuth resource identifier |
+| `BITBUCKET_OAUTH_ISSUER_URL` | `https://bitbucket.org` | Advertised authorization server |
+| `BITBUCKET_CLIENT_CACHE_SIZE` / `_TTL` | `128` / `900` | Bound on the per-identity client cache (LRU + TTL, seconds). TTL `0` builds a fresh client per request |
+| `BITBUCKET_TOKEN_CACHE_SIZE` / `_TTL` | `256` / `300` | Bound on cached token verifications. The TTL is the **revocation window** — set it to `0` to verify every request |
+| `BITBUCKET_MULTITENANT_ALLOW_DESTRUCTIVE` | *(off)* | Allow `merge`, `decline`, `delete_*`, `stop_pipeline` |
+| `BITBUCKET_MULTITENANT_READ_ONLY` | *(off)* | Expose read-only tools only |
+
+> **Not supported in this mode**: Bitbucket Repository/Workspace Access Tokens — they are not bound to a user account, so no identity can be derived. Use single-tenant HTTP for that. Bearer tokens require TLS: terminate HTTPS in front of the server.
+
+**stdio is unaffected** — it stays single-user with environment variables, exactly as documented above.
+
+See **[docs/deployment-modes.md](docs/deployment-modes.md)** for the full matrix of the three deployment modes and the threat model of each.
 
 ## Development
 

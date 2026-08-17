@@ -10,7 +10,7 @@ import warnings
 
 from mcp.server.transport_security import TransportSecuritySettings
 
-from .server import close_clients, mcp
+from .server import close_clients, enable_multi_tenant, mcp
 from .utils.pagination import set_page_hard_cap
 
 # Default ceiling on pages fetched per tool call in stateless mode (see
@@ -96,6 +96,63 @@ def _validate_allowlists(parser):
             f"BITBUCKET_ALLOWED_ORIGINS are enforced as a pair, and leaving one empty "
             f"rejects every request (421/403)."
         )
+
+
+def _env_int(name, default):
+    """Read a positive integer from the environment, falling back on a bad value.
+
+    Same tolerance as _page_hard_cap_from_env: a malformed tuning knob must not take the
+    server down. A zero is accepted where the caller allows it (default >= 0 check).
+    """
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        print(f"Warning: {name}={raw!r} is not an integer, using {default}", file=sys.stderr)
+        return default
+    if value < 0:
+        print(f"Warning: {name}={value} must be >= 0, using {default}", file=sys.stderr)
+        return default
+    return value
+
+
+def _env_flag(name):
+    """Read a boolean environment flag ("1", "true", "yes", "on" — case-insensitive)."""
+    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _build_multi_tenant_config(parser):
+    """Build the multi-tenant configuration from the environment.
+
+    ``BITBUCKET_RESOURCE_SERVER_URL`` is mandatory: it is this server's public URL, used
+    as the OAuth resource identifier and as the base of the protected-resource metadata
+    the SDK advertises in its ``WWW-Authenticate`` challenges. There is no sane default —
+    guessing it would hand clients a wrong discovery document.
+    """
+    from .auth import DEFAULT_ISSUER_URL, MultiTenantConfig
+
+    resource_server_url = os.environ.get("BITBUCKET_RESOURCE_SERVER_URL", "").strip()
+    if not resource_server_url:
+        parser.error(
+            "--multi-tenant requires BITBUCKET_RESOURCE_SERVER_URL (this server's public "
+            "URL, e.g. https://mcp.example.com), used as the OAuth resource identifier."
+        )
+
+    return MultiTenantConfig(
+        resource_server_url=resource_server_url,
+        issuer_url=os.environ.get("BITBUCKET_OAUTH_ISSUER_URL", "").strip() or DEFAULT_ISSUER_URL,
+        # No `or 1` floor here: _TenantClientCache and BitbucketTokenVerifier already
+        # clamp their size to >= 1, and swallowing a 0 silently would be the only knob in
+        # this file that does not report a bad value.
+        client_cache_size=_env_int("BITBUCKET_CLIENT_CACHE_SIZE", 128),
+        client_cache_ttl=_env_int("BITBUCKET_CLIENT_CACHE_TTL", 900),
+        token_cache_size=_env_int("BITBUCKET_TOKEN_CACHE_SIZE", 256),
+        token_cache_ttl=_env_int("BITBUCKET_TOKEN_CACHE_TTL", 300),
+        allow_destructive=_env_flag("BITBUCKET_MULTITENANT_ALLOW_DESTRUCTIVE"),
+        read_only=_env_flag("BITBUCKET_MULTITENANT_READ_ONLY"),
+    )
 
 
 def _install_stdio_signal_handlers():
@@ -193,8 +250,12 @@ Examples:
   # Stateless Streamable HTTP (horizontal scaling / serverless, single-tenant)
   python -m src.main --transport http --port 8080 --stateless
 
-Environment variables required:
-  BITBUCKET_USERNAME      - Your Bitbucket account email
+  # Multi-tenant: every caller brings their own Bitbucket OAuth bearer token
+  BITBUCKET_RESOURCE_SERVER_URL=https://mcp.example.com \\
+    python -m src.main --transport http --port 8080 --stateless --multi-tenant
+
+Environment variables required (single-tenant modes only):
+  BITBUCKET_USERNAME   - Your Bitbucket account email
   BITBUCKET_TOKEN      - Your Bitbucket API token
   BITBUCKET_WORKSPACE  - Your Bitbucket workspace name
 
@@ -202,6 +263,17 @@ Optional (HTTP transport):
   BITBUCKET_ALLOWED_HOSTS       - Comma-separated Host allowlist (DNS-rebinding protection)
   BITBUCKET_ALLOWED_ORIGINS     - Comma-separated Origin allowlist
   BITBUCKET_MAX_PAGES_HARD_CAP  - Max pages per tool call in stateless mode (default: 10)
+
+Multi-tenant (--multi-tenant):
+  BITBUCKET_RESOURCE_SERVER_URL          - REQUIRED. This server's public URL
+  BITBUCKET_OAUTH_ISSUER_URL             - OAuth issuer (default: https://bitbucket.org)
+  BITBUCKET_CLIENT_CACHE_SIZE            - Max cached per-identity clients (default: 128)
+  BITBUCKET_CLIENT_CACHE_TTL             - Client cache TTL in seconds (default: 900)
+  BITBUCKET_TOKEN_CACHE_SIZE             - Max cached token verifications (default: 256)
+  BITBUCKET_TOKEN_CACHE_TTL              - Verification TTL / revocation window, seconds
+                                           (default: 300; 0 = verify on every request)
+  BITBUCKET_MULTITENANT_ALLOW_DESTRUCTIVE - Allow destructive tools (default: off)
+  BITBUCKET_MULTITENANT_READ_ONLY        - Expose read-only tools only (default: off)
 """
     )
 
@@ -247,6 +319,17 @@ Optional (HTTP transport):
         )
     )
 
+    parser.add_argument(
+        "--multi-tenant",
+        action="store_true",
+        help=(
+            "Serve several users from one process: each request must carry the caller's "
+            "own Bitbucket OAuth access token as a bearer, and runs under that identity. "
+            "The process needs no Bitbucket credential of its own. Requires --transport "
+            "http and BITBUCKET_RESOURCE_SERVER_URL."
+        )
+    )
+
     args = parser.parse_args(argv)
 
     # Reject rather than ignore: a silently dropped --stateless is a production footgun.
@@ -255,16 +338,34 @@ Optional (HTTP transport):
     if args.stateless and args.transport != "http":
         parser.error("--stateless requires --transport http")
 
+    # Same reasoning: multi-tenant auth is bearer-token based, which only exists over
+    # HTTP. stdio is one process per user by construction and stays single-user.
+    if args.multi_tenant and args.transport != "http":
+        parser.error("--multi-tenant requires --transport http")
+
     if args.transport != "stdio":
         _validate_allowlists(parser)
 
-    # Validate credentials (env vars → keychain fallback)
+    multi_tenant_config = _build_multi_tenant_config(parser) if args.multi_tenant else None
+
+    # Validate credentials (env vars → keychain fallback).
+    # Skipped in multi-tenant mode: the process holds no Bitbucket credential of its own,
+    # each request brings the caller's. Any credential left in the environment is inert —
+    # get_client() never falls back to it — but say so, since finding it configured and
+    # unused is otherwise baffling.
     from .utils.credentials import get_credentials
-    try:
-        get_credentials()
-    except ValueError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
+    if multi_tenant_config is None:
+        try:
+            get_credentials()
+        except ValueError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+    elif os.environ.get("BITBUCKET_TOKEN"):
+        print(
+            "Warning: BITBUCKET_TOKEN is set but ignored in --multi-tenant mode; "
+            "every request authenticates with the caller's own bearer token.",
+            file=sys.stderr,
+        )
 
     # Map the CLI choice to the FastMCP transport name once, so every log message
     # uses the real transport ('http' -> 'streamable-http'; 'sse' -> legacy alias).
@@ -299,6 +400,9 @@ Optional (HTTP transport):
             mcp.settings.transport_security = _build_transport_security()
 
             mode = transport
+            if multi_tenant_config is not None:
+                enable_multi_tenant(multi_tenant_config)
+                mode = f"{mode}, multi-tenant"
             if args.stateless:
                 mcp.settings.stateless_http = True
                 # Single JSON response instead of an SSE stream — required by edge and
