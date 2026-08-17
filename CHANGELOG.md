@@ -23,6 +23,9 @@
 - `BitbucketClient.close()` is idempotent, so the several cleanup paths cannot double-close.
 - In multi-tenant mode the startup credential check is skipped (there is nothing to check); a leftover `BITBUCKET_TOKEN` is reported as ignored rather than silently unused.
 
+### Fixed
+- **Default-workspace resolution hit an endpoint Atlassian had already removed** (issue #77). `GET /2.0/user/permissions/workspaces` was retired on 2026-04-14 (CHANGE-2770, the cross-workspace API sunset) and answers **410 Gone** for every caller — as does `GET /2.0/workspaces`. The `>= 400 -> None` guard swallowed it, so `workspace=None` never resolved to the caller's workspace and every tool call had to name its workspace, with nothing in the logs to say why. Now `GET /2.0/user/workspaces`, which returns the same `values[].workspace.slug` shape and honours `pagelen` identically (both verified live). A 410 is handled apart from the generic `>= 400` case and logged at most once an hour: a retired endpoint is a bug in this client, not a caller permission problem, and must not read as "this identity has no membership". The bug was invisible in CI because every test mocked the HTTP response — the suite now asserts the **requested path**, and the three mock routers that had silently stopped matching share one helper.
+
 ### Notes
 - **Repository and Workspace Access Tokens are not supported** in multi-tenant mode: they are not bound to a user account, so `GET /2.0/user` rejects them and no identity can be derived. Use single-tenant HTTP for that case.
 - The server enforces no scopes of its own — Bitbucket answers 401/403 per call, and the scope names are not readable from `/2.0/user`.

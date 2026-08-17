@@ -632,9 +632,24 @@ def _workspaces_response(*slugs):
     return _response(200, {"values": [{"workspace": {"slug": slug}} for slug in slugs]})
 
 
+def _is_workspaces_url(url):
+    """Is this the workspace-listing leg of a verification (vs the /user leg)?
+
+    Single source of truth on purpose: the same routing decision was duplicated in three
+    mocks, and when the endpoint moved (CHANGE-2770, issue #77) they silently stopped
+    matching — each one then served the /user payload for both legs, degrading the tests
+    to the "no membership" branch without failing. One helper, one place to update.
+
+    Matched on the exact suffix rather than a substring: "/user" is a prefix of
+    "/user/workspaces" (a prefix test routes both legs to /user), and the client also
+    calls workspace-scoped "/workspaces/{slug}/..." paths that must not match here.
+    """
+    return str(url).endswith("/user/workspaces")
+
+
 def _routed_get(user_response, workspaces_response):
     async def fake_get(self, url, **kwargs):
-        return workspaces_response if "permissions/workspaces" in url else user_response
+        return workspaces_response if _is_workspaces_url(url) else user_response
 
     return fake_get
 
@@ -652,6 +667,84 @@ async def test_verifier_resolves_identity_and_single_workspace():
     assert token.identity.workspace == "acme"
     assert token.subject == "account-a"
     assert token.token == SECRET
+
+
+@pytest.mark.asyncio
+async def test_verifier_uses_the_live_workspace_endpoint():
+    """The workspace listing must target /user/workspaces, not the retired endpoint.
+
+    /2.0/user/permissions/workspaces and /2.0/workspaces were removed on 2026-04-14
+    (CHANGE-2770) and answer 410 for every caller. Every other test mocks the response,
+    so a dead URL stays invisible to them — asserting on the requested path is the only
+    thing that catches it (issue #77).
+    """
+    verifier = BitbucketTokenVerifier()
+    requested = []
+
+    async def recording_get(self, url, **kwargs):
+        requested.append(str(url))
+        return _workspaces_response("acme") if _is_workspaces_url(url) else _user_response()
+
+    with patch.object(httpx.AsyncClient, "get", recording_get):
+        token = await verifier.verify_token(SECRET)
+
+    assert token.identity.workspace == "acme"
+    assert any(url.endswith("/user/workspaces") for url in requested)
+    assert not any("permissions/workspaces" in url for url in requested)
+
+
+@pytest.mark.asyncio
+async def test_verifier_survives_a_gone_workspace_endpoint(caplog):
+    """A 410 leaves the identity usable, and says so at most once an hour.
+
+    Should this endpoint be retired in turn, callers must still authenticate — only the
+    implicit workspace is lost — and the log must name the cause distinctly, since a
+    silent None is indistinguishable from "this identity has no membership".
+    """
+    verifier = BitbucketTokenVerifier(cache_ttl=0)
+    gone = _response(410, {"type": "error", "error": {"message": "deprecated"}})
+
+    with (
+        patch.object(httpx.AsyncClient, "get", _routed_get(_user_response(), gone)),
+        caplog.at_level(logging.ERROR, logger="src.auth"),
+    ):
+        first = await verifier.verify_token(SECRET)
+        # A second, distinct token: caching is off, so this is a full re-verification
+        # and would log again were the throttle missing.
+        second = await verifier.verify_token("another-token")
+
+    assert first is not None and second is not None
+    assert first.identity.account_id == "account-a"
+    assert first.identity.workspace is None
+    errors = [r for r in caplog.records if r.levelno == logging.ERROR]
+    assert len(errors) == 1, "the 410 error must be throttled, not logged per request"
+    assert "CHANGE-2770" in errors[0].getMessage()
+
+
+@pytest.mark.asyncio
+async def test_gone_workspace_endpoint_is_logged_again_after_the_interval(caplog):
+    """The throttle must not silence the problem forever on a long-lived process.
+
+    The verifier is a process singleton, so a "log once ever" flag would leave an
+    operator with a single line for a degradation lasting weeks.
+    """
+    verifier = BitbucketTokenVerifier(cache_ttl=0)
+    gone = _response(410, {"type": "error"})
+
+    with (
+        patch.object(httpx.AsyncClient, "get", _routed_get(_user_response(), gone)),
+        caplog.at_level(logging.ERROR, logger="src.auth"),
+    ):
+        await verifier.verify_token(SECRET)
+        with patch.object(
+            src.auth.time,
+            "monotonic",
+            return_value=time.monotonic() + src.auth.WORKSPACE_GONE_LOG_INTERVAL + 1,
+        ):
+            await verifier.verify_token("another-token")
+
+    errors = [r for r in caplog.records if r.levelno == logging.ERROR]
+    assert len(errors) == 2
 
 
 @pytest.mark.asyncio
@@ -713,13 +806,16 @@ async def test_verifier_caches_and_expires():
 
     async def counting_get(self, url, **kwargs):
         calls.append(url)
-        return _workspaces_response("acme") if "permissions/workspaces" in url else _user_response()
+        return _workspaces_response("acme") if _is_workspaces_url(url) else _user_response()
 
     with patch.object(httpx.AsyncClient, "get", counting_get):
         first = await verifier.verify_token(SECRET)
         second = await verifier.verify_token(SECRET)
         assert first is second
-        assert len(calls) == 2  # /user + /user/permissions/workspaces, once
+        # Asserted, not just counted: without it a mock that stops matching the real URL
+        # degrades this to the "no membership" branch and still passes.
+        assert first.identity.workspace == "acme"
+        assert len(calls) == 2  # /user + /user/workspaces, once
 
         with patch.object(
             src.auth.time, "monotonic", return_value=time.monotonic() + 3600
@@ -736,8 +832,9 @@ async def test_verifier_cache_is_bounded():
         httpx.AsyncClient, "get", _routed_get(_user_response(), _workspaces_response("acme"))
     ):
         for index in range(50):
-            await verifier.verify_token(f"token-{index}")
+            token = await verifier.verify_token(f"token-{index}")
     assert verifier.cache_size() == 3
+    assert token.identity.workspace == "acme"
 
 
 @pytest.mark.asyncio
@@ -746,8 +843,9 @@ async def test_verifier_ttl_zero_disables_caching():
     with patch.object(
         httpx.AsyncClient, "get", _routed_get(_user_response(), _workspaces_response("acme"))
     ):
-        await verifier.verify_token(SECRET)
+        token = await verifier.verify_token(SECRET)
     assert verifier.cache_size() == 0
+    assert token.identity.workspace == "acme"
 
 
 @pytest.mark.asyncio
@@ -759,12 +857,13 @@ async def test_verifier_deduplicates_concurrent_verifications():
     async def slow_get(self, url, **kwargs):
         calls.append(url)
         await asyncio.sleep(0.01)
-        return _workspaces_response("acme") if "permissions/workspaces" in url else _user_response()
+        return _workspaces_response("acme") if _is_workspaces_url(url) else _user_response()
 
     with patch.object(httpx.AsyncClient, "get", slow_get):
         results = await asyncio.gather(*(verifier.verify_token(SECRET) for _ in range(10)))
 
     assert all(result is results[0] for result in results)
+    assert results[0].identity.workspace == "acme"
     assert len(calls) == 2
 
 
