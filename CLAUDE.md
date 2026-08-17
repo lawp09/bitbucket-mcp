@@ -88,7 +88,8 @@ security add-generic-password -s "bitbucket-mcp" -a "bitbucket_workspace" -w "wo
 ## Architecture
 
 ### Authentication
-- **Method**: Basic Auth (`Authorization: Basic base64(email:token)`)
+- **Method**: Basic Auth (`Authorization: Basic base64(email:token)`) — the default, one identity per process
+- **Multi-tenant HTTP** (`--multi-tenant`): each request carries the caller's own Bitbucket OAuth token as `Authorization: Bearer`, verified per request; the process holds no credential. See [`docs/deployment-modes.md`](docs/deployment-modes.md) for the three deployment modes and the threat model of each
 - **API Base**: `https://api.bitbucket.org/2.0`
 
 ### MCP Tools (96)
