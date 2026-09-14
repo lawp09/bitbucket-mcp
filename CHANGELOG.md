@@ -1,5 +1,38 @@
 # Changelog - Bitbucket MCP Server Python
 
+## [1.26.1] - 2026-09-14
+
+### Fixed
+- **`get_pipeline_step_logs` returned 503 on every default call** (issue #80). Asking for the
+  trailing `max_bytes` was expressed as an HTTP suffix range (`Range: bytes=-N`), and the
+  endpoint's **inline** serving mode answers `503` to that form. The tail is now derived from
+  the log's actual size and requested as an absolute range, which both of the endpoint's
+  serving modes accept. Measured on a real step: the endpoint alternates between serving the
+  log inline and `307`-redirecting to pre-signed storage, and only the inline mode rejects the
+  suffix form — so the client cannot pick a form per mode and must use the one that always works.
+- The size is established with a **one-byte ranged `GET`** (`Range: bytes=0-0`), reading the
+  total from `Content-Range`. `HEAD` was the obvious probe and is unusable: the storage URL is
+  pre-signed for `GET` and answers `403` to a `HEAD` that follows the redirect. When the probe
+  cannot establish a size — non-2xx, no usable size header, transport failure — the call falls
+  back to an unranged read whose tail is kept client-side: correct, but it reads the whole log
+  to return its tail.
+- The derived window is left **open-ended** (`bytes=S-`) rather than closed. A running step
+  keeps writing between the probe and the fetch, and a closed window would pin the response to
+  an offset that is already ageing; the overshoot this allows is trimmed client-side, so
+  `max_bytes` still holds.
+- A `416` on a probe-derived window no longer tells the caller to narrow a window they never
+  chose — it reports the log changing size mid-read.
+
+### Changed
+- `_read_capped_stream` takes an explicit `mode` (`passthrough` / `carve` / `tail`) instead of
+  a range-header string used for its truthiness. The fallback path needs "keep the tail although
+  no range was sent", which the previous tri-state could only express by passing a fake header.
+
+### Notes
+- A default (tail) call now makes **two** requests instead of one. An explicit `start`/`end`
+  window, or `max_bytes=None`, still makes one and is otherwise unchanged. The response shape
+  (`content`, `truncated`, `returned_bytes`, `total_bytes`) is unchanged.
+
 ## [1.26.0] - 2026-08-12
 
 ### Added
