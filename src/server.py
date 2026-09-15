@@ -1864,6 +1864,9 @@ async def get_pipeline_step_logs(
     default) are returned. Check the `truncated` flag in the response and page
     through the rest with `start`/`end` if you need more.
 
+    Reading the tail costs two requests: one to establish the log's size, one to
+    fetch the tail. Passing an explicit `start`/`end` window skips the first.
+
     Args:
         repo_slug: Repository slug
         pipeline_uuid: Pipeline UUID, e.g. "{adab6a1f-...}". Unlike get_pipeline_run,
