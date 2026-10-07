@@ -254,7 +254,9 @@ class AuthorizationError(Exception):
 
     - multi-tenant mode is active but the request carries no verified Bitbucket identity;
     - the caller's identity resolves to no default workspace and none was passed;
-    - Bitbucket answered 401/403 for a bearer-authenticated (multi-tenant) call.
+    - Bitbucket answered 401/403 to a request that carried the caller's bearer token
+      (multi-tenant). A 401/403 from a host reached by redirect, which never received
+      the token, stays an ``httpx.HTTPStatusError``.
 
     The message never contains a token: only the account id, the workspace and the HTTP
     status. Mirrors the ``IssueTrackerDisabledError`` convention (typed exception ->
@@ -280,10 +282,18 @@ async def _raise_authorization_error(response: httpx.Response) -> None:
 
     Installed on bearer (multi-tenant) clients only. The message carries the method, the
     path and the status — never the ``Authorization`` header, and never the token.
+
+    httpx runs response hooks on every leg of a redirect chain, and strips
+    ``Authorization`` from a leg that leaves the original origin (scheme, host, port).
+    A leg without the header never presented the caller's token, so its 401/403 — a
+    pre-signed storage URL that expired, for instance — says nothing about that token
+    and is left to ``raise_for_status`` (issue #81).
     """
     if response.status_code not in (401, 403):
         return
     request = response.request
+    if "Authorization" not in request.headers:
+        return
     raise AuthorizationError(
         f"Bitbucket refused the request ({response.status_code}) for "
         f"{request.method} {request.url.path}. The caller's token is missing the "
@@ -1635,10 +1645,12 @@ class BitbucketClient:
         returns the right bytes, only by reading the whole log to get at its tail.
 
         Raises:
-            AuthorizationError: For a bearer (multi-tenant) client answered 401/403.
-                The response hook raises it on every leg, this probe included, and it
-                is deliberately left to propagate: swallowing it would merely have the
-                real fetch raise the identical error one round-trip later.
+            AuthorizationError: For a bearer (multi-tenant) client answered 401/403 by
+                Bitbucket. The response hook raises it on this probe as on any request,
+                and it is deliberately left to propagate: swallowing it would merely
+                have the real fetch raise the identical error one round-trip later. A
+                401/403 from the storage host the probe was redirected to is not one:
+                it is a non-2xx answer like any other, hence None.
         """
         try:
             async with self.client.stream(
@@ -1822,6 +1834,10 @@ class BitbucketClient:
         Raises:
             ValueError: On an invalid range, on 416 (requested range not
                 satisfiable), or when the log exceeds the streaming ceiling.
+            AuthorizationError: Bearer (multi-tenant) client answered 401/403 by
+                Bitbucket.
+            httpx.HTTPStatusError: Any other non-2xx answer, including a 401/403
+                from the storage host a completed step redirects to.
         """
         ws = self._resolve_workspace(workspace)
         range_header, eff_start, eff_end = _build_log_range(start, end, max_bytes)

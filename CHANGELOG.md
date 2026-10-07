@@ -1,5 +1,12 @@
 # Changelog - Bitbucket MCP Server Python
 
+## [Unreleased]
+
+### Fixed
+- Multi-tenant: a 401/403 from the pre-signed storage host behind `get_pipeline_step_logs` is no
+  longer reported as the caller's token being expired or under-scoped — only a request that
+  actually carried the token can blame it; the rest surface as `httpx.HTTPStatusError` (issue #81).
+
 ## [1.26.1] - 2026-09-14
 
 ### Fixed
