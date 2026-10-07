@@ -39,6 +39,7 @@ from src.client import (
     BasicAuthStrategy,
     BearerAuthStrategy,
     BitbucketClient,
+    _raise_authorization_error,
 )
 from src.server import close_clients, enable_multi_tenant, get_client, mcp
 
@@ -961,6 +962,30 @@ async def test_basic_client_keeps_raising_http_status_error():
     with pytest.raises(httpx.HTTPStatusError):
         await client.get_repository("my-repo")
     await client.close()
+
+
+def _answered(status: int, url: str, headers: dict) -> httpx.Response:
+    return httpx.Response(status, request=httpx.Request("GET", url, headers=headers))
+
+
+@pytest.mark.parametrize("status", [401, 403])
+@pytest.mark.asyncio
+async def test_auth_hook_maps_a_refusal_of_the_callers_token(status):
+    response = _answered(
+        status, "https://api.bitbucket.org/2.0/user", {"Authorization": f"Bearer {SECRET}"}
+    )
+    with pytest.raises(AuthorizationError) as exc:
+        await _raise_authorization_error(response)
+    assert exc.value.status_code == status
+    assert SECRET not in str(exc.value)
+
+
+@pytest.mark.parametrize("status", [401, 403])
+@pytest.mark.asyncio
+async def test_auth_hook_ignores_a_leg_that_never_carried_the_token(status):
+    """A redirect leg httpx stripped of Authorization cannot have refused the token."""
+    response = _answered(status, "https://storage.example.com/log?sig=expired", {})
+    assert await _raise_authorization_error(response) is None
 
 
 # ========== SDK guard-rails ==========

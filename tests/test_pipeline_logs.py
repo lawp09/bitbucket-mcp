@@ -1034,6 +1034,44 @@ async def test_bearer_403_on_the_probe_surfaces_as_authorization_error(bearer_cl
     assert "bearer-token-abc" not in str(exc.value)
 
 
+@pytest.mark.parametrize("status", [401, 403])
+@pytest.mark.asyncio
+async def test_bearer_storage_refusal_is_not_blamed_on_the_token(bearer_client, status):
+    """A 401/403 from the pre-signed storage host is a storage failure (#81)."""
+    from src.client import AuthorizationError
+
+    with respx.mock:
+        api = respx.get(LOG_URL).mock(
+            return_value=httpx.Response(307, headers={"Location": STORAGE_URL})
+        )
+        storage = respx.get(STORAGE_URL).mock(return_value=httpx.Response(status))
+        with pytest.raises(httpx.HTTPStatusError) as exc:
+            await _get_logs(bearer_client)
+
+    assert not isinstance(exc.value, AuthorizationError)
+    assert exc.value.response.status_code == status
+    # The probe's refusal is an ordinary non-2xx: it falls back to the unranged read,
+    # which is the leg whose raise_for_status surfaces the error.
+    assert api.call_count == 2 and storage.call_count == 2
+    assert "Range" not in api.calls[-1].request.headers
+    assert all("Authorization" not in call.request.headers for call in storage.calls)
+
+
+@pytest.mark.asyncio
+async def test_bearer_same_origin_redirect_then_403_is_still_the_token(bearer_client):
+    """The token survives a same-origin hop, so a refusal there is still about it."""
+    from src.client import AuthorizationError
+
+    moved = "https://api.bitbucket.org/2.0/moved-log"
+    with respx.mock:
+        respx.get(LOG_URL).mock(return_value=httpx.Response(307, headers={"Location": moved}))
+        target = respx.get(moved).mock(return_value=httpx.Response(403, json={}))
+        with pytest.raises(AuthorizationError):
+            await _get_logs(bearer_client)
+
+    assert target.calls[0].request.headers["Authorization"] == "Bearer bearer-token-abc"
+
+
 # ========== _tail_window ==========
 
 
