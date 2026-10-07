@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.27.0] - 2026-10-07
+
 ### Added
 - Multi-tenant: the server publishes `/.well-known/oauth-authorization-server`, pointing at
   Bitbucket's OAuth endpoints, so it can be added to **claude.ai as a custom connector** —
