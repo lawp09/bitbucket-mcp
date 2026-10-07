@@ -32,15 +32,19 @@ from typing import Dict, Optional, Tuple
 import httpx
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.provider import AccessToken
-from pydantic import Field
+from mcp.shared.auth import OAuthMetadata
+from pydantic import AnyHttpUrl, Field
 
 logger = logging.getLogger(__name__)
 
 BITBUCKET_API_BASE = "https://api.bitbucket.org/2.0"
 
-# Bitbucket's own OAuth authorization server. Used as the default ``issuer_url`` advertised
-# in the protected-resource metadata; overridable for proxied/enterprise setups.
-DEFAULT_ISSUER_URL = "https://bitbucket.org"
+# Bitbucket's OAuth endpoints. Bitbucket publishes no RFC 8414 metadata for them, so this
+# server advertises them under its own issuer (see build_authorization_server_metadata).
+BITBUCKET_AUTHORIZE_URL = "https://bitbucket.org/site/oauth2/authorize"
+BITBUCKET_TOKEN_URL = "https://bitbucket.org/site/oauth2/access_token"
+
+_DEFAULT_PORTS = {"http": 80, "https": 443}
 
 DEFAULT_TOKEN_CACHE_TTL = 300  # seconds
 DEFAULT_TOKEN_CACHE_SIZE = 256
@@ -98,7 +102,9 @@ class MultiTenantConfig:
     """Runtime configuration of the multi-tenant HTTP mode."""
 
     resource_server_url: str
-    issuer_url: str = DEFAULT_ISSUER_URL
+    #: Advertised authorization server. ``None`` means this server's own origin, which
+    #: then serves the authorization-server metadata itself.
+    issuer_url: Optional[str] = None
     client_cache_size: int = DEFAULT_CLIENT_CACHE_SIZE
     client_cache_ttl: int = DEFAULT_CLIENT_CACHE_TTL
     token_cache_size: int = DEFAULT_TOKEN_CACHE_SIZE
@@ -107,6 +113,51 @@ class MultiTenantConfig:
     allow_destructive: bool = False
     #: Expose only tools flagged ``readOnlyHint`` — strictest posture.
     read_only: bool = False
+
+    @property
+    def origin(self) -> str:
+        """Scheme, host and non-default port of ``resource_server_url`` — no path, no userinfo."""
+        url = AnyHttpUrl(self.resource_server_url)
+        port = "" if url.port == _DEFAULT_PORTS.get(url.scheme) else f":{url.port}"
+        return f"{url.scheme}://{url.host}{port}"
+
+    @property
+    def effective_issuer_url(self) -> str:
+        """The issuer advertised in the protected-resource metadata."""
+        return self.issuer_url or self.origin
+
+    @property
+    def serves_authorization_metadata(self) -> bool:
+        """Whether ``/.well-known/oauth-authorization-server`` is answered by this server.
+
+        Only when the issuer *is* this server's origin: that is the one URL a client
+        derives that lands on this server's root ``/.well-known/``. An issuer elsewhere —
+        or on this host but with a path — must publish its own metadata.
+        """
+        return AnyHttpUrl(self.effective_issuer_url) == AnyHttpUrl(self.origin)
+
+
+def build_authorization_server_metadata(issuer_url: str) -> OAuthMetadata:
+    """RFC 8414 metadata that points MCP clients at Bitbucket's OAuth endpoints.
+
+    The client then runs the authorization-code flow against Bitbucket directly, with its
+    own pre-registered (confidential) Bitbucket OAuth client. Bitbucket supports neither
+    public clients nor dynamic registration, hence no ``registration_endpoint`` and no
+    ``none`` auth method.
+
+    ``S256`` is advertised because MCP clients must refuse an authorization server that
+    does not, but Bitbucket accepts a wrong ``code_verifier``: protection of the code in
+    transit rests on the client secret (see ``docs/deployment-modes.md``).
+    """
+    return OAuthMetadata(
+        issuer=AnyHttpUrl(issuer_url),
+        authorization_endpoint=AnyHttpUrl(BITBUCKET_AUTHORIZE_URL),
+        token_endpoint=AnyHttpUrl(BITBUCKET_TOKEN_URL),
+        response_types_supported=["code"],
+        grant_types_supported=["authorization_code", "refresh_token"],
+        token_endpoint_auth_methods_supported=["client_secret_basic", "client_secret_post"],
+        code_challenge_methods_supported=["S256"],
+    )
 
 
 def token_fingerprint(token: str) -> str:

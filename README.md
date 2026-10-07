@@ -329,7 +329,7 @@ BITBUCKET_RESOURCE_SERVER_URL=https://mcp.example.com \
   python -m src.main --transport http --host 0.0.0.0 --port 8080 --stateless --multi-tenant
 ```
 
-The token is verified against `GET /2.0/user`, which yields the caller's `account_id` and default workspace; the same token is then reused for the downstream API calls, so no credential is ever stored or mapped. Unauthenticated requests get a `401` with a `WWW-Authenticate` challenge pointing at `/.well-known/oauth-protected-resource`.
+The token is verified against `GET /2.0/user`, which yields the caller's `account_id` and default workspace; the same token is then reused for the downstream API calls, so no credential is ever stored or mapped. Unauthenticated requests get a `401` with a `WWW-Authenticate` challenge pointing at `/.well-known/oauth-protected-resource`. Since Bitbucket publishes no OAuth metadata, the server serves `/.well-known/oauth-authorization-server` itself, pointing at Bitbucket's endpoints — which is what lets it be added to **claude.ai as a custom connector** (Bitbucket sign-in through the Atlassian login); setup, what was verified and the residual risks in [docs/deployment-modes.md](docs/deployment-modes.md#connecting-from-claudeai-and-claude-code).
 
 What this buys you:
 
@@ -341,7 +341,7 @@ What this buys you:
 | Environment variable | Default | Purpose |
 |---|---|---|
 | `BITBUCKET_RESOURCE_SERVER_URL` | *(required)* | This server's public URL — the OAuth resource identifier |
-| `BITBUCKET_OAUTH_ISSUER_URL` | `https://bitbucket.org` | Advertised authorization server |
+| `BITBUCKET_OAUTH_ISSUER_URL` | *(this server's origin)* | Advertised authorization server. Leave unset: the server then publishes the OAuth metadata itself |
 | `BITBUCKET_CLIENT_CACHE_SIZE` / `_TTL` | `128` / `900` | Bound on the per-identity client cache (LRU + TTL, seconds). TTL `0` builds a fresh client per request |
 | `BITBUCKET_TOKEN_CACHE_SIZE` / `_TTL` | `256` / `300` | Bound on cached token verifications. The TTL is the **revocation window** — set it to `0` to verify every request |
 | `BITBUCKET_MULTITENANT_ALLOW_DESTRUCTIVE` | *(off)* | Allow `merge`, `decline`, `delete_*`, `stop_pipeline` |

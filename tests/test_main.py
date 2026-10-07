@@ -459,6 +459,26 @@ def test_multi_tenant_wires_auth_from_the_environment(restore_multi_tenant):
     assert str(mcp.settings.auth.resource_server_url).rstrip("/") == "https://mcp.example.com"
 
 
+@pytest.mark.parametrize(
+    "issuer_env,advertised",
+    [
+        (None, "https://mcp.example.com"),  # default: this server serves the metadata
+        ("", "https://mcp.example.com"),
+        ("https://idp.example.com", "https://idp.example.com"),
+    ],
+)
+def test_multi_tenant_issuer_defaults_to_the_servers_origin(
+    restore_multi_tenant, issuer_env, advertised
+):
+    env = {"BITBUCKET_RESOURCE_SERVER_URL": "https://mcp.example.com/mcp"}
+    if issuer_env is not None:
+        env["BITBUCKET_OAUTH_ISSUER_URL"] = issuer_env
+    with _Transports(), patch.dict(os.environ, env), patch(CREDS_TARGET):
+        main(["--transport", "http", "--multi-tenant"])
+
+    assert str(mcp.settings.auth.issuer_url).rstrip("/") == advertised
+
+
 def test_multi_tenant_warns_about_an_unused_process_token(restore_multi_tenant, capsys):
     env = {
         "BITBUCKET_RESOURCE_SERVER_URL": "https://mcp.example.com",

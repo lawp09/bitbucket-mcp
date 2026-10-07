@@ -131,7 +131,7 @@ def _build_multi_tenant_config(parser):
     the SDK advertises in its ``WWW-Authenticate`` challenges. There is no sane default —
     guessing it would hand clients a wrong discovery document.
     """
-    from .auth import DEFAULT_ISSUER_URL, MultiTenantConfig
+    from .auth import MultiTenantConfig
 
     resource_server_url = os.environ.get("BITBUCKET_RESOURCE_SERVER_URL", "").strip()
     if not resource_server_url:
@@ -142,7 +142,7 @@ def _build_multi_tenant_config(parser):
 
     return MultiTenantConfig(
         resource_server_url=resource_server_url,
-        issuer_url=os.environ.get("BITBUCKET_OAUTH_ISSUER_URL", "").strip() or DEFAULT_ISSUER_URL,
+        issuer_url=os.environ.get("BITBUCKET_OAUTH_ISSUER_URL", "").strip() or None,
         # No `or 1` floor here: _TenantClientCache and BitbucketTokenVerifier already
         # clamp their size to >= 1, and swallowing a 0 silently would be the only knob in
         # this file that does not report a bad value.
@@ -266,7 +266,8 @@ Optional (HTTP transport):
 
 Multi-tenant (--multi-tenant):
   BITBUCKET_RESOURCE_SERVER_URL          - REQUIRED. This server's public URL
-  BITBUCKET_OAUTH_ISSUER_URL             - OAuth issuer (default: https://bitbucket.org)
+  BITBUCKET_OAUTH_ISSUER_URL             - OAuth issuer (default: this server's origin,
+                                           which then serves the issuer metadata)
   BITBUCKET_CLIENT_CACHE_SIZE            - Max cached per-identity clients (default: 128)
   BITBUCKET_CLIENT_CACHE_TTL             - Client cache TTL in seconds (default: 900)
   BITBUCKET_TOKEN_CACHE_SIZE             - Max cached token verifications (default: 256)

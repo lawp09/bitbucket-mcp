@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Added
+- Multi-tenant: the server publishes `/.well-known/oauth-authorization-server`, pointing at
+  Bitbucket's OAuth endpoints, so it can be added to **claude.ai as a custom connector** —
+  Bitbucket publishes no such metadata, which left OAuth discovery at a dead end (issue #85);
+  see docs/deployment-modes.md, « Connecting from claude.ai and Claude Code ».
+
+### Changed
+- `BITBUCKET_OAUTH_ISSUER_URL` now defaults to the server's own origin instead of
+  `https://bitbucket.org`; leave it unset unless an external authorization server publishes
+  its own metadata.
+
 ### Fixed
 - Multi-tenant: a 401/403 from the pre-signed storage host behind `get_pipeline_step_logs` is no
   longer reported as the caller's token being expired or under-scoped — only a request that
