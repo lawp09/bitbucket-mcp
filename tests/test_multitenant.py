@@ -19,6 +19,7 @@ import os
 import time
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
+from urllib.parse import urlsplit
 
 import httpx
 import pytest
@@ -31,6 +32,7 @@ from src.auth import (
     BitbucketIdentity,
     BitbucketTokenVerifier,
     MultiTenantConfig,
+    build_authorization_server_metadata,
     current_identity,
     token_fingerprint,
 )
@@ -1114,6 +1116,147 @@ async def test_two_identities_through_the_real_asgi_stack(monkeypatch):
     assert alice_client_id != bob_client_id
 
     await close_clients()
+
+
+# ========== Authorization-server metadata (#85) ==========
+
+
+@pytest.mark.parametrize(
+    "resource,origin",
+    [
+        ("https://mcp.example.com", "https://mcp.example.com"),
+        ("https://mcp.example.com/mcp", "https://mcp.example.com"),
+        ("https://user:pw@MCP.example.com:443/x", "https://mcp.example.com"),
+        ("http://localhost:8000/mcp", "http://localhost:8000"),
+        ("http://[::1]:8000/mcp", "http://[::1]:8000"),
+    ],
+)
+def test_origin_drops_path_userinfo_and_default_port(resource, origin):
+    assert MultiTenantConfig(resource_server_url=resource).origin == origin
+
+
+def test_issuer_defaults_to_this_servers_origin():
+    config = MultiTenantConfig(resource_server_url="https://mcp.example.com/mcp")
+    assert config.effective_issuer_url == "https://mcp.example.com"
+    assert config.serves_authorization_metadata is True
+
+
+@pytest.mark.parametrize(
+    "issuer,served",
+    [
+        ("https://mcp.example.com/", True),  # explicit, but this server's origin
+        ("https://bitbucket.org", False),  # publishes no metadata: dead end, warned
+        ("https://idp.example.com", False),  # an external authorization server
+        ("https://mcp.example.com/as", False),  # our host, but clients look under /as
+    ],
+)
+def test_metadata_is_served_only_when_this_server_is_the_issuer(issuer, served):
+    config = MultiTenantConfig(resource_server_url="https://mcp.example.com/mcp", issuer_url=issuer)
+    assert config.effective_issuer_url == issuer
+    assert config.serves_authorization_metadata is served
+
+
+def test_metadata_points_at_bitbucket_and_advertises_only_what_it_accepts():
+    metadata = build_authorization_server_metadata("https://mcp.example.com").model_dump(
+        mode="json", exclude_none=True
+    )
+    assert metadata == {
+        "issuer": "https://mcp.example.com/",
+        "authorization_endpoint": "https://bitbucket.org/site/oauth2/authorize",
+        "token_endpoint": "https://bitbucket.org/site/oauth2/access_token",
+        "response_types_supported": ["code"],
+        "grant_types_supported": ["authorization_code", "refresh_token"],
+        "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post"],
+        "code_challenge_methods_supported": ["S256"],
+    }
+
+
+def test_external_issuer_is_warned_about(caplog):
+    with caplog.at_level(logging.WARNING, logger="src.server"):
+        enable_multi_tenant(
+            MultiTenantConfig(resource_server_url="https://mcp.example.com", issuer_url="https://bitbucket.org")
+        )
+    assert "leave BITBUCKET_OAUTH_ISSUER_URL unset" in caplog.text
+
+
+@pytest.mark.parametrize("issuer", [None, "https://idp.example.com"])
+def test_default_or_real_external_issuer_is_not_warned_about(caplog, issuer):
+    """Only the known dead end warns; a real external server is a legitimate setup."""
+    with caplog.at_level(logging.WARNING, logger="src.server"):
+        enable_multi_tenant(
+            MultiTenantConfig(resource_server_url="https://mcp.example.com", issuer_url=issuer)
+        )
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+
+@pytest.fixture
+def http_app(monkeypatch):
+    """Build the real Streamable HTTP app once multi-tenant state is in place."""
+    monkeypatch.setattr(mcp.settings, "transport_security", None)
+    # streamable_http_app() builds the session manager once per process, freezing the
+    # settings of that moment; a fresh one keeps these tests order-independent.
+    monkeypatch.setattr(mcp, "_session_manager", None)
+
+    def build():
+        return httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=mcp.streamable_http_app()),
+            base_url="http://testserver",
+        )
+
+    return build
+
+
+@pytest.mark.asyncio
+async def test_client_discovery_lands_on_the_metadata_and_issuers_match(http_app):
+    """Follow the SDK client's own discovery chain: PRM -> issuer -> metadata URL."""
+    from mcp.client.auth.utils import (
+        build_oauth_authorization_server_metadata_discovery_urls,
+    )
+
+    resource = "https://mcp.example.com/mcp"
+    enable_multi_tenant(MultiTenantConfig(resource_server_url=resource))
+
+    async with http_app() as http:
+        prm = await http.get("/.well-known/oauth-protected-resource/mcp")
+        issuer = prm.json()["authorization_servers"][0]
+        first_url = build_oauth_authorization_server_metadata_discovery_urls(issuer, resource)[0]
+        metadata = await http.get(urlsplit(first_url).path)
+
+    assert prm.status_code == 200
+    assert metadata.status_code == 200
+    # RFC 8414 §3.3: the client compares these strings, so they must match byte for byte.
+    assert metadata.json()["issuer"] == issuer
+    assert metadata.json() == build_authorization_server_metadata(issuer).model_dump(
+        mode="json", exclude_none=True
+    )
+
+
+@pytest.mark.asyncio
+async def test_metadata_answers_a_cors_preflight(http_app, multi_tenant):
+    async with http_app() as http:
+        response = await http.options(
+            "/.well-known/oauth-authorization-server",
+            headers={"Origin": "https://inspector.example", "Access-Control-Request-Method": "GET"},
+        )
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "*"
+
+
+@pytest.mark.asyncio
+async def test_metadata_is_404_with_an_external_issuer(http_app):
+    enable_multi_tenant(
+        MultiTenantConfig(resource_server_url="https://mcp.example.com", issuer_url="https://idp.example.com")
+    )
+    async with http_app() as http:
+        response = await http.get("/.well-known/oauth-authorization-server")
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_metadata_is_404_in_single_tenant_mode(http_app):
+    async with http_app() as http:
+        response = await http.get("/.well-known/oauth-authorization-server")
+    assert response.status_code == 404
 
 
 # ========== AC6 — documentation ==========

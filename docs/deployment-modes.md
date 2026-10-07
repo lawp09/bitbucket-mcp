@@ -102,12 +102,92 @@ Unauthenticated requests get a `401` with a `WWW-Authenticate` challenge pointin
   (admin-managed connectors, IdP-group-derived authorization) waits on an SDK that supports
   it.
 
+## Connecting from claude.ai and Claude Code
+
+A multi-tenant deployment can be added to claude.ai as a **custom connector**. An admin adds
+it once, and each member clicks *Connect* and signs in through Bitbucket — an Atlassian
+login, so the organisation's **SSO** should apply. Claude Code lists claude.ai connectors when
+signed in with the same account (seen with other connectors; not yet confirmed with this
+one).
+
+**How discovery works.** Bitbucket publishes no OAuth authorization-server metadata, so
+the server publishes it under its own name:
+
+```
+401 WWW-Authenticate  ->  /.well-known/oauth-protected-resource/<path>
+                          authorization_servers = [this server's origin]
+                      ->  /.well-known/oauth-authorization-server   (served by this server)
+                          authorization_endpoint = https://bitbucket.org/site/oauth2/authorize
+                          token_endpoint         = https://bitbucket.org/site/oauth2/access_token
+```
+
+The client then runs the authorization-code flow **against Bitbucket directly**, holds and
+refreshes the tokens, and presents the Bitbucket access token as `Bearer`. The server still
+stores nothing. Both well-known documents live at the **root of the origin**: behind a
+reverse proxy that mounts the server under a path prefix, route `/.well-known/` to it too.
+
+Leave `BITBUCKET_OAUTH_ISSUER_URL` unset. Pointing it elsewhere turns the route off (`404`);
+only do it for an external authorization server that publishes its own metadata. Pointing
+it at `https://bitbucket.org`, which publishes none, logs a warning at startup.
+
+**1. Bitbucket OAuth client.** *Workspace settings → Apps and features → OAuth clients →
+Create OAuth client*:
+
+- **Authorization**: grant types *Authorization code* and *Refresh token*; callback URL
+  `https://claude.ai/api/mcp/auth_callback`.
+- **Scopes**: whatever the enabled tools need — *Repositories*, *Pull requests*,
+  *Pipelines*, *Issues*… — plus the identity lookups the verifier makes (`/2.0/user`,
+  `/2.0/user/workspaces`). The scopes are those of the client: the server requests none.
+
+Bitbucket issues every OAuth client a secret, and its token endpoint refuses an exchange
+without it — so the client is confidential by construction.
+
+**2. claude.ai.** *Organization settings → Connectors → Add → Custom*: the MCP endpoint
+(e.g. `https://mcp.example.com/mcp`), and under OAuth client **Use your own OAuth client**
+with the client ID and secret. The other two options cannot work: Bitbucket publishes no
+registration endpoint, and refuses clients that hold no secret.
+
+**3. Claude Code**, signed in with the claude.ai account, should list the connector.
+
+**Verified** against Bitbucket Cloud (2026-10-07, real OAuth client with *Account*,
+*Workspace membership*, *Repositories* and *Pull requests* read):
+
+- the authorize endpoint accepts `code_challenge` (S256), `resource` and `redirect_uri`;
+- the token endpoint accepts `code_verifier` and `resource`, with the secret in the body or
+  as Basic auth, and refuses an exchange without the secret;
+- refresh works and rotates the refresh token; the access token lasts 2 hours and passes
+  the verifier (`/2.0/user`, `/2.0/user/workspaces`);
+- the menu path and grant-type options above, as of that date.
+
+**Not verified yet**: claude.ai accepting an issuer whose endpoints live on another host —
+and one serialised with a trailing slash (`https://mcp.example.com/`), as the SDK emits it in
+both documents; Claude Code inheriting this connector; SSO enforcement at the Atlassian
+login; the minimal scope set; how many callback URLs a client accepts. The first three need
+a deployed instance.
+
+**Residual risks.**
+
+- **PKCE is advertised, not enforced.** MCP clients refuse an authorization server that
+  does not advertise `S256`, so it is advertised. But Bitbucket accepts a wrong
+  `code_verifier`: an intercepted authorization code is protected by the **client secret**
+  alone.
+- **The client secret lives in claude.ai**, in the connector's configuration, where the
+  organisation's connector admins manage it. Rotate it in Bitbucket and re-add the
+  connector if it leaks.
+- **Tokens are not bound to this server.** Bitbucket accepts the `resource` parameter but
+  does not scope the token to it, and the server accepts any valid Bitbucket user token it
+  can verify by use — including one issued to another application of the same user, and
+  vice versa.
+- **The client's scopes are a ceiling for every member.** Each member still acts within
+  their own Bitbucket permissions, but no member's token can exceed the scopes granted to
+  the shared client.
+
 ## Configuration reference (multi-tenant)
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `BITBUCKET_RESOURCE_SERVER_URL` | — (**required**) | This server's public URL; the OAuth resource identifier and metadata base |
-| `BITBUCKET_OAUTH_ISSUER_URL` | `https://bitbucket.org` | Advertised authorization server |
+| `BITBUCKET_OAUTH_ISSUER_URL` | this server's origin | Advertised authorization server. Unset, this server serves `/.well-known/oauth-authorization-server`, pointing at Bitbucket's endpoints |
 | `BITBUCKET_CLIENT_CACHE_SIZE` | `128` | Max cached per-identity clients |
 | `BITBUCKET_CLIENT_CACHE_TTL` | `900` | Client cache TTL, seconds; `0` builds a fresh client per request |
 | `BITBUCKET_TOKEN_CACHE_SIZE` | `256` | Max cached token verifications |

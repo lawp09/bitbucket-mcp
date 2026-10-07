@@ -12,7 +12,10 @@ from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Optional, Dict, Any, Tuple
+from urllib.parse import urlsplit
 from weakref import WeakKeyDictionary
+from mcp.server.auth.handlers.metadata import MetadataHandler
+from mcp.server.auth.routes import cors_middleware
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
@@ -22,6 +25,7 @@ from .auth import (
     MultiTenantConfig,
     DEFAULT_CLIENT_CACHE_SIZE,
     DEFAULT_CLIENT_CACHE_TTL,
+    build_authorization_server_metadata,
     current_identity,
     token_fingerprint,
 )
@@ -389,6 +393,27 @@ async def healthz(request):
     return JSONResponse({"status": "ok"})
 
 
+async def authorization_server_metadata(request):
+    """RFC 8414 metadata pointing MCP clients at Bitbucket's OAuth endpoints (issue #85).
+
+    Bitbucket publishes none, so a client following the protected-resource metadata to
+    ``bitbucket.org`` would dead-end. Answered only in multi-tenant mode and when this
+    server is the advertised issuer; 404 otherwise. Registered once at import, like
+    ``/healthz``, and decided per request from ``_multi_tenant``.
+    """
+    config = _multi_tenant
+    if config is None or not config.serves_authorization_metadata:
+        return JSONResponse({"error": "not_found"}, status_code=404)
+    metadata = build_authorization_server_metadata(config.effective_issuer_url)
+    return await MetadataHandler(metadata).handle(request)
+
+
+# CORS like the SDK's own metadata routes, for browser-based clients (MCP Inspector).
+mcp.custom_route("/.well-known/oauth-authorization-server", methods=["GET", "OPTIONS"])(
+    cors_middleware(authorization_server_metadata, ["GET", "OPTIONS"])
+)
+
+
 # Bitbucket clients, keyed by the event loop they were created on.
 #
 # An httpx.AsyncClient owns a connection pool bound to the loop that created it. A single
@@ -672,7 +697,7 @@ def enable_multi_tenant(config: MultiTenantConfig) -> BitbucketTokenVerifier:
         cache_size=config.token_cache_size,
     )
     mcp.settings.auth = AuthSettings(
-        issuer_url=config.issuer_url,
+        issuer_url=config.effective_issuer_url,
         resource_server_url=config.resource_server_url,
         # No server-side scope requirement: the caller's token carries the caller's own
         # Bitbucket rights, and Bitbucket answers 401/403 per call. Enforcing a scope list
@@ -684,10 +709,23 @@ def enable_multi_tenant(config: MultiTenantConfig) -> BitbucketTokenVerifier:
     logger.info(
         "Multi-tenant mode enabled (resource=%s, issuer=%s, read_only=%s, allow_destructive=%s)",
         config.resource_server_url,
-        config.issuer_url,
+        config.effective_issuer_url,
         config.read_only,
         config.allow_destructive,
     )
+    if not config.serves_authorization_metadata:
+        message = (
+            "Issuer %s is not this server's origin (%s): /.well-known/oauth-authorization-server "
+            "answers 404 here, and MCP clients will fetch the metadata from the issuer."
+        )
+        args = (config.effective_issuer_url, config.origin)
+        if urlsplit(config.effective_issuer_url).hostname == "bitbucket.org":
+            logger.warning(
+                message + " bitbucket.org publishes none: leave BITBUCKET_OAUTH_ISSUER_URL unset.",
+                *args,
+            )
+        else:
+            logger.info(message, *args)
     return verifier
 
 
