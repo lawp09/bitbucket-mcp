@@ -9,9 +9,12 @@ extraAllowedHosts: []
 extraAllowedOrigins: []
 
 multiTenant:
-  # -- Expose read-only tools only.
+  # -- Expose read-only tools only. Recommended for a first deployment: otherwise every
+  # caller can comment, approve, create pull requests or run pipelines.
   readOnly: false
-  # -- Allow tools flagged destructive (merge, decline, delete_*, stop_pipeline).
+  # -- Allow tools flagged destructive among those configs/tools.json enables: by default
+  # decline_pull_request and the comment/task deletions (merge, stop_pipeline and delete_issue*
+  # stay disabled there, and the chart has no way to change that file).
   allowDestructive: false
   # -- External OAuth issuer. Leave empty: the server then publishes the OAuth metadata
   # itself, pointing at Bitbucket's endpoints (see docs/deployment-modes.md).
@@ -30,6 +33,7 @@ image:
 
 imagePullSecrets: []
 
+# -- Stateless: replicas are safe, but token and client caches are per pod.
 replicaCount: 1
 
 containerPort: 8000

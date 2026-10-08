@@ -17,7 +17,7 @@ is not reachable from anywhere.
 | `workspace=None` resolves to | `BITBUCKET_WORKSPACE` | `BITBUCKET_WORKSPACE` | the **caller's** workspace |
 | Users per process | 1 | 1 identity, N callers | N identities |
 | Audit trail | none (single user) | none (single identity) | `bitbucket_mcp.audit`: tool + `account_id` + workspace |
-| Destructive tools | per `configs/tools.json` | per `configs/tools.json` | additionally **off** unless opted in |
+| Destructive tools | per `configs/tools.json` (3 on by default) | per `configs/tools.json` (3 on by default) | additionally **off** unless opted in |
 
 ## A — stdio, single user
 
@@ -26,11 +26,13 @@ credential lives in that user's environment or keychain and never crosses a netw
 
 **Threat model.** The trust boundary is the OS user account. Anyone who can run processes
 as that user can already read the token from the environment — the MCP server adds no
-exposure. Nothing here changed in v1.25.0.
+exposure.
 
 **Residual risks.** A malicious MCP client, or a prompt-injected agent, acts with the full
-rights of the token. Keep the destructive tools disabled in `configs/tools.json` unless you
-need them.
+rights of the token. `configs/tools.json` disables most destructive tools but leaves
+`decline_pull_request`, `delete_pull_request_comment` and `delete_pull_request_task`
+enabled; set them to `"enabled": false` (or point `BITBUCKET_TOOLS_CONFIG` at your own
+file) if you do not need them.
 
 ## B — HTTP, single-tenant
 
@@ -43,10 +45,14 @@ boundary is entirely the network.
 
 **Requirements.**
 
-- Bind to loopback, or put the port behind a gateway that authenticates callers.
+- Bind to loopback with `--host 127.0.0.1` — the default is `0.0.0.0`, every interface — or
+  put the port behind a gateway that authenticates callers.
 - Set `BITBUCKET_ALLOWED_HOSTS` **and** `BITBUCKET_ALLOWED_ORIGINS` together (DNS-rebinding
-  protection). Setting only one rejects every request — they are enforced as a pair.
-- Keep destructive tools disabled.
+  protection). The server refuses to start with only one: alone, it would reject every
+  request.
+- Disable the destructive tools still enabled by default — `decline_pull_request`,
+  `delete_pull_request_comment` and `delete_pull_request_task` — in your tools
+  configuration: every caller would otherwise get them.
 - `--stateless` adds a pagination ceiling (`BITBUCKET_MAX_PAGES_HARD_CAP`, default 10) that
   bounds how much one call can amplify into Bitbucket API traffic.
 
@@ -56,7 +62,7 @@ account for every action, whoever triggered it.
 ## C — HTTP, multi-tenant
 
 ```bash
-BITBUCKET_RESOURCE_SERVER_URL=https://mcp.example.com \
+BITBUCKET_RESOURCE_SERVER_URL=https://mcp.example.com/mcp \
   python -m src.main --transport http --stateless --multi-tenant
 ```
 
@@ -66,8 +72,10 @@ caller's `account_id` and default workspace, and reuses the same token for the d
 API calls. **The server stores no credential of its own and maps nothing** — the token
 presented *is* the caller's credential, carrying exactly the caller's rights.
 
-Unauthenticated requests get a `401` with a `WWW-Authenticate` challenge pointing at
-`/.well-known/oauth-protected-resource`.
+Unauthenticated requests get a `401` with a `WWW-Authenticate` challenge pointing at the
+protected-resource metadata, `/.well-known/oauth-protected-resource` followed by the path of
+`BITBUCKET_RESOURCE_SERVER_URL` — `/.well-known/oauth-protected-resource/mcp` for the
+recommended value, the MCP endpoint's URL.
 
 **Threat model.**
 
@@ -78,12 +86,50 @@ Unauthenticated requests get a `401` with a `WWW-Authenticate` challenge pointin
 | Token leaking into logs / errors / tracebacks | The token is never a dict key (a SHA-256 fingerprint is), never in `repr()` (redacted on the client, the auth strategies, and the access token), and never in an error message. Cache keys and log lines carry `account_id` only. |
 | A rotated token still being used | The cached client stores the fingerprint of the token it was built with; a request presenting a different token rebuilds the client instead of reusing the stale credential, and *replaces* the identity's cache entry rather than adding one. |
 | Unbounded memory from N identities | The client cache is LRU + TTL bounded (`BITBUCKET_CLIENT_CACHE_SIZE`, default 128; `BITBUCKET_CLIENT_CACHE_TTL`, default 900 s) and closes evicted clients — but only once no in-flight request is using them. |
-| Destructive actions by an unvetted caller | Tools flagged `destructiveHint` (merge, decline, `delete_*`, `stop_pipeline`) are refused unless `BITBUCKET_MULTITENANT_ALLOW_DESTRUCTIVE=1`. `BITBUCKET_MULTITENANT_READ_ONLY=1` narrows this further to `readOnlyHint` tools only. |
+| Destructive actions by an unvetted caller | Tools flagged `destructiveHint` are refused unless `BITBUCKET_MULTITENANT_ALLOW_DESTRUCTIVE=1` — on top of `configs/tools.json`, which already disables `merge`, `stop_pipeline` and `delete_issue*`; the flag therefore unlocks `decline_pull_request`, `delete_pull_request_comment` and `delete_pull_request_task`. `BITBUCKET_MULTITENANT_READ_ONLY=1` narrows everything to `readOnlyHint` tools. |
 | No attribution | Every tool call is logged to `bitbucket_mcp.audit` with the tool name, `account_id` and workspace. Never with credentials or arguments. |
-| Quota exhaustion across tenants | Bitbucket quotas are **per account**, and each call consumes the *caller's* quota — one tenant cannot drain another's. `BITBUCKET_MAX_PAGES_HARD_CAP` still bounds amplification per call. |
+| Quota exhaustion across tenants | Bitbucket meters authenticated calls per user, and each call runs under the caller's own token, so tenants do not share a quota. `BITBUCKET_MAX_PAGES_HARD_CAP` bounds amplification per call. |
 
 **Residual risks — read these before deploying.**
 
+- **This mode deviates from the MCP authorization spec.** The 2025-11-25 specification
+  requires an MCP server to accept only tokens issued for it (audience validation) and
+  forbids passing the client's token through to an upstream API. This server does both:
+  Bitbucket access tokens carry no audience it could check, and the caller's token is
+  forwarded to `api.bitbucket.org` as-is. That is what keeps the server stateless, with no
+  token store, and the caller's rights exact; the cost is that any valid Bitbucket user
+  token is accepted, whichever application it was issued to, and that a token presented
+  here works against the Bitbucket API directly. Conforming would take an OAuth broker that
+  issues its own tokens and keeps the Bitbucket ones server-side — the design rejected in
+  #85, to revisit if conformance matters more than statelessness.
+- **Any Bitbucket account can use the server.** There is no allowlist of accounts or
+  workspaces: holding a valid Bitbucket user token is the whole admission test. Someone
+  outside your workspace sees none of your private data, but uses your server — its tools, its
+  egress IP, its rate budget — against whatever their own account reaches. Network
+  filtering helps only for clients you control: a claude.ai connector must stay reachable
+  from Anthropic's servers, which serve every claude.ai user. The real fix is an allowlist
+  of workspaces in the server; it does not exist yet.
+- **Write tools are open to every caller.** Only *destructive* tools are refused by default:
+  the 20 other write tools enabled in `configs/tools.json` — comment, approve, create or
+  update a pull request, run a pipeline, create an issue… — run for anyone who connects,
+  within their own Bitbucket rights, including when an agent acting for them has been
+  prompt-injected. Start with `BITBUCKET_MULTITENANT_READ_ONLY=1`, and widen deliberately.
+- **Unknown tokens are not cached.** Only successful verifications are; every request with
+  an unknown or invalid token costs a call to Bitbucket from the server's egress IP.
+  Bitbucket meters authenticated calls per user but anonymous ones per IP (60 an hour);
+  whether a rejected token counts as anonymous is not documented. Put a rate limit in
+  front of a public endpoint rather than find out.
+- **Revocation happens at Bitbucket, and only cuts data access.** The server keeps no
+  session it could close and admits any valid Bitbucket user token (see above), so
+  revoking a member's authorization of the OAuth client only stops the tokens issued to
+  that client. Removing them from the workspace cuts them off from its data — not from the
+  server. Whether rotating the client secret invalidates tokens already issued has not
+  been verified; at worst they live out their 2 hours.
+- **The audit log names people.** `bitbucket_mcp.audit` lines carry the caller's
+  `account_id` and go to stderr, so into whatever collects the container's logs; retention
+  is that system's.
+- **Refused calls leave no audit line.** A tool refused by the read-only or destructive
+  policy fails before it is logged to `bitbucket_mcp.audit`.
 - **Revocation lag.** A verified token is cached for `BITBUCKET_TOKEN_CACHE_TTL` seconds
   (default 300). A token revoked on Bitbucket's side keeps working until that entry
   expires. Set `BITBUCKET_TOKEN_CACHE_TTL=0` to verify on every request, at the cost of two
@@ -189,7 +235,7 @@ To deploy this mode on Kubernetes — image, Helm chart, per-cluster ingress —
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `BITBUCKET_RESOURCE_SERVER_URL` | — (**required**) | This server's public URL; the OAuth resource identifier and metadata base |
+| `BITBUCKET_RESOURCE_SERVER_URL` | — (**required**) | Public URL of the MCP endpoint (e.g. `https://mcp.example.com/mcp`); the OAuth resource identifier and metadata base |
 | `BITBUCKET_OAUTH_ISSUER_URL` | this server's origin | Advertised authorization server. Unset, this server serves `/.well-known/oauth-authorization-server`, pointing at Bitbucket's endpoints |
 | `BITBUCKET_CLIENT_CACHE_SIZE` | `128` | Max cached per-identity clients |
 | `BITBUCKET_CLIENT_CACHE_TTL` | `900` | Client cache TTL, seconds; `0` builds a fresh client per request |

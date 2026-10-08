@@ -47,7 +47,7 @@ uvx --from bitbucket-mcp-py==1.8.1 bitbucket-mcp
 
 ### 2. Configure credentials
 
-Set the following environment variables (or use a `.env` file — see [Credentials](#credentials)):
+Set the following environment variables — in your MCP client's `env` block, as shown above, or in the system keychain (see [Credentials](#credentials)):
 
 | Variable | Description |
 |----------|-------------|
@@ -229,12 +229,9 @@ Prompts are enabled/disabled in `configs/tools.json` under the top-level `prompt
 
 ## Credentials
 
-### Option 1: `.env` file (recommended)
+### Option 1: environment variables (recommended)
 
-```bash
-cp .env.example .env
-# Edit .env with your credentials
-```
+Put them in the `env` block of your MCP client configuration, as in the examples above, or export them in the shell that launches the server.
 
 ### Option 2: System keychain (most secure)
 
@@ -242,6 +239,8 @@ cp .env.example .env
 pip install 'bitbucket-mcp-py[keyring]'
 python3 -c "import keyring; keyring.set_password('bitbucket-mcp', 'bitbucket_token', 'YOUR_TOKEN')"
 ```
+
+> **About `.env`**: the server itself never reads a `.env` file. `.env.example` is a template for containers, which load it with `--env-file .env` or `env_file:` (the Docker, Makefile and `docker-compose.yml` setups); with `uvx` or `python -m src.main`, use option 1 or 2.
 
 ## Docker (Alternative)
 
@@ -270,11 +269,13 @@ Then configure your AI assistant to use `docker exec`:
 The server speaks **stdio** by default (the standard transport for local MCP clients). For a network deployment it also supports **Streamable HTTP** (MCP spec 2025-03-26):
 
 ```bash
-# Streamable HTTP on 0.0.0.0:8080
-python -m src.main --transport http --host 0.0.0.0 --port 8080
+# Streamable HTTP on localhost:8080
+python -m src.main --transport http --host 127.0.0.1 --port 8080
 ```
 
 > Clients connect to `http://<host>:<port>/mcp` (e.g. `http://localhost:8080/mcp`).
+
+> ⚠️ `--host` defaults to `0.0.0.0`, every interface. Without `--multi-tenant` the server has no authentication of its own: anyone who can reach the port acts with your Bitbucket token. Bind to `127.0.0.1` unless the port sits behind an authenticating proxy.
 
 > `--transport sse` (legacy Server-Sent Events) is still accepted but **deprecated** — it emits a `DeprecationWarning`. Prefer `--transport http`.
 
@@ -299,9 +300,11 @@ curl http://localhost:8080/healthz    # {"status": "ok"}
 **In a container** — the image's default `CMD` keeps it idle for `exec`-based stdio usage, so server mode is started by overriding the command:
 
 ```bash
-podman run -d --name bitbucket-mcp-http -p 8000:8000 --env-file .env bitbucket-mcp-py \
+podman run -d --name bitbucket-mcp-http -p 127.0.0.1:8000:8000 --env-file .env bitbucket-mcp-py \
   python -m src.main --transport http --host 0.0.0.0 --port 8000 --stateless
 ```
+
+> Inside the container `--host 0.0.0.0` is required; `-p 127.0.0.1:8000:8000` is what keeps the published port off the network, since this single-tenant server answers every caller with the `.env` token.
 
 > Works identically with `docker run`. The image exposes port 8000.
 
@@ -325,27 +328,29 @@ export BITBUCKET_ALLOWED_ORIGINS="https://app.example.com"
 By default an HTTP deployment is **single-tenant**: every caller acts with the process-wide Bitbucket token. `--multi-tenant` changes that — each request carries the **caller's own Bitbucket OAuth access token** as `Authorization: Bearer`, and runs under that identity. The server holds no Bitbucket credential of its own.
 
 ```bash
-BITBUCKET_RESOURCE_SERVER_URL=https://mcp.example.com \
+BITBUCKET_RESOURCE_SERVER_URL=https://mcp.example.com/mcp \
   python -m src.main --transport http --host 0.0.0.0 --port 8080 --stateless --multi-tenant
 ```
 
-The token is verified against `GET /2.0/user`, which yields the caller's `account_id` and default workspace; the same token is then reused for the downstream API calls, so no credential is ever stored or mapped. Unauthenticated requests get a `401` with a `WWW-Authenticate` challenge pointing at `/.well-known/oauth-protected-resource`. Since Bitbucket publishes no OAuth metadata, the server serves `/.well-known/oauth-authorization-server` itself, pointing at Bitbucket's endpoints — which is what lets it be added to **claude.ai as a custom connector** (Bitbucket sign-in through the Atlassian login); setup, what was verified and the residual risks in [docs/deployment-modes.md](docs/deployment-modes.md#connecting-from-claudeai-and-claude-code).
+The token is verified against `GET /2.0/user`, which yields the caller's `account_id` and default workspace; the same token is then reused for the downstream API calls, so no credential is ever stored or mapped. Unauthenticated requests get a `401` with a `WWW-Authenticate` challenge pointing at `/.well-known/oauth-protected-resource/mcp`. Since Bitbucket publishes no OAuth metadata, the server serves `/.well-known/oauth-authorization-server` itself, pointing at Bitbucket's endpoints — which is what lets it be added to **claude.ai as a custom connector** (Bitbucket sign-in through the Atlassian login); setup, what was verified and the residual risks in [docs/deployment-modes.md](docs/deployment-modes.md#connecting-from-claudeai-and-claude-code).
 
 What this buys you:
 
 - **Isolation** — one Bitbucket client per `(identity, workspace)`; two callers never share one, and there is no process token to fall back on.
 - **`workspace=None` means *your* workspace** — resolved from the caller's memberships, never from `BITBUCKET_WORKSPACE`. With zero or several memberships there is no default and calls must name their workspace.
 - **Audit trail** — every call is logged to the `bitbucket_mcp.audit` logger with the tool, the `account_id` and the workspace. Never credentials.
-- **Tighter defaults** — tools flagged `destructiveHint` are refused unless explicitly enabled.
+- **Tighter defaults** — tools flagged `destructiveHint` are refused unless explicitly enabled. The other write tools (comment, approve, create a pull request, run a pipeline…) stay available to every caller: set `BITBUCKET_MULTITENANT_READ_ONLY=1` for a first deployment.
 
 | Environment variable | Default | Purpose |
 |---|---|---|
-| `BITBUCKET_RESOURCE_SERVER_URL` | *(required)* | This server's public URL — the OAuth resource identifier |
+| `BITBUCKET_RESOURCE_SERVER_URL` | *(required)* | Public URL of the MCP endpoint, e.g. `https://mcp.example.com/mcp` — the OAuth resource identifier |
 | `BITBUCKET_OAUTH_ISSUER_URL` | *(this server's origin)* | Advertised authorization server. Leave unset: the server then publishes the OAuth metadata itself |
 | `BITBUCKET_CLIENT_CACHE_SIZE` / `_TTL` | `128` / `900` | Bound on the per-identity client cache (LRU + TTL, seconds). TTL `0` builds a fresh client per request |
 | `BITBUCKET_TOKEN_CACHE_SIZE` / `_TTL` | `256` / `300` | Bound on cached token verifications. The TTL is the **revocation window** — set it to `0` to verify every request |
-| `BITBUCKET_MULTITENANT_ALLOW_DESTRUCTIVE` | *(off)* | Allow `merge`, `decline`, `delete_*`, `stop_pipeline` |
+| `BITBUCKET_MULTITENANT_ALLOW_DESTRUCTIVE` | *(off)* | Allow the destructive tools that `configs/tools.json` enables — by default `decline_pull_request`, `delete_pull_request_comment`, `delete_pull_request_task`; `merge`, `stop_pipeline` and `delete_issue*` stay disabled there |
 | `BITBUCKET_MULTITENANT_READ_ONLY` | *(off)* | Expose read-only tools only |
+
+> **Spec deviation**: the caller's Bitbucket token is accepted without an audience check and forwarded upstream as-is, which the MCP authorization spec (2025-11-25) forbids — trade-offs and residual risks in [docs/deployment-modes.md](docs/deployment-modes.md#c--http-multi-tenant).
 
 > **Not supported in this mode**: Bitbucket Repository/Workspace Access Tokens — they are not bound to a user account, so no identity can be derived. Use single-tenant HTTP for that. Bearer tokens require TLS: terminate HTTPS in front of the server.
 

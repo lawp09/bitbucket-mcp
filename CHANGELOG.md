@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Changed
+- Multi-tenant docs now state its deviation from the MCP authorization spec (no audience
+  check, token passthrough) and the risks it implies — see docs/deployment-modes.md, mode C.
+- `BITBUCKET_RESOURCE_SERVER_URL` is documented as the MCP endpoint's URL (`…/mcp`), the value
+  the Helm chart sets and the claude.ai connector was verified with.
+
+### Fixed
+- The docs recommended a `.env` file the server never reads; credentials go in the MCP
+  client's `env` block or the keychain, `.env` only feeds containers.
+
 ## [1.28.0] - 2026-10-07
 
 ### Added

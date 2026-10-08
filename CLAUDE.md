@@ -95,11 +95,8 @@ server.json              # MCP Registry server manifest
 
 ## Credentials Configuration
 
-**Option 1: `.env` File (Recommended)**
-```bash
-cp .env.example .env
-# Edit .env with your credentials
-```
+**Option 1: Environment variables (Recommended)** — the MCP client's `env` block (see above)
+or the launching shell.
 
 **Option 2: System Keychain (More Secure)**
 ```bash
@@ -112,7 +109,9 @@ security add-generic-password -s "bitbucket-mcp" -a "bitbucket_token" -w "token"
 security add-generic-password -s "bitbucket-mcp" -a "bitbucket_workspace" -w "workspace"
 ```
 
-**Fallback Chain**: `.env` file → System keychain
+**Fallback Chain**: environment variables → system keychain (`src/utils/credentials.py`).
+The server never reads `.env`: it only feeds containers (`--env-file` for Docker and `make up`,
+`env_file:` in `docker-compose.yml`).
 
 > **Security**: `.env` is in `.gitignore`. Never commit credentials.
 
