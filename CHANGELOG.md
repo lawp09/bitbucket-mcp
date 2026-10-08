@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+- The claude.ai connector is verified live on a Helm deployment, with what remains unverified
+  listed — see docs/deployment-modes.md, « Connecting from claude.ai and Claude Code ».
+
 ## [1.28.0] - 2026-10-07
 
 ### Added

@@ -106,9 +106,8 @@ Unauthenticated requests get a `401` with a `WWW-Authenticate` challenge pointin
 
 A multi-tenant deployment can be added to claude.ai as a **custom connector**. An admin adds
 it once, and each member clicks *Connect* and signs in through Bitbucket — an Atlassian
-login, so the organisation's **SSO** should apply. Claude Code lists claude.ai connectors when
-signed in with the same account (seen with other connectors; not yet confirmed with this
-one).
+login, so the organisation's **SSO** should apply. Claude Code, signed in with the same
+claude.ai account, picks the connector up too.
 
 **How discovery works.** Bitbucket publishes no OAuth authorization-server metadata, so
 the server publishes it under its own name:
@@ -147,7 +146,8 @@ without it — so the client is confidential by construction.
 with the client ID and secret. The other two options cannot work: Bitbucket publishes no
 registration endpoint, and refuses clients that hold no secret.
 
-**3. Claude Code**, signed in with the claude.ai account, should list the connector.
+**3. Claude Code** needs nothing: signed in with the claude.ai account, it lists the
+connector.
 
 **Verified** against Bitbucket Cloud (2026-10-07, real OAuth client with *Account*,
 *Workspace membership*, *Repositories* and *Pull requests* read):
@@ -159,11 +159,17 @@ registration endpoint, and refuses clients that hold no secret.
   the verifier (`/2.0/user`, `/2.0/user/workspaces`);
 - the menu path and grant-type options above, as of that date.
 
-**Not verified yet**: claude.ai accepting an issuer whose endpoints live on another host —
-and one serialised with a trailing slash (`https://mcp.example.com/`), as the SDK emits it in
-both documents; Claude Code inheriting this connector; SSO enforcement at the Atlassian
-login; the minimal scope set; how many callback URLs a client accepts. The first three need
-a deployed instance.
+**Verified live** (2026-10-07, one user, v1.28.0 deployed with the Helm chart behind a
+Cloudflare Tunnel): claude.ai discovers the authorization server through this server's
+metadata — an issuer whose endpoints live on another host, serialised with a trailing
+slash — and completes the Bitbucket authorization with *Use your own OAuth client*; Claude
+Code then lists the connector, and a `list_repositories` call through it is audited under
+the caller's `account_id`, in the workspace resolved from their memberships.
+
+**Not verified yet**: SSO enforcement at the Atlassian login; claude.ai refreshing the
+token once the 2-hour access token expires; several users at once (isolation is covered by
+the transport-level test only); tool calls from the claude.ai web chat and from clients
+other than claude.ai; the minimal scope set; how many callback URLs a client accepts.
 
 **Residual risks.**
 
