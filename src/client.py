@@ -4,8 +4,9 @@ import base64
 import logging
 import re
 import urllib.parse
-from typing import Any, Dict, Literal, Optional, Protocol
+from typing import Any, Callable, Dict, FrozenSet, Literal, Optional, Protocol
 import httpx
+from .auth import audit_logger, is_workspace_allowed
 
 from .utils.pagination import PaginationConfig, aggregate_pages
 
@@ -302,6 +303,74 @@ async def _raise_authorization_error(response: httpx.Response) -> None:
     )
 
 
+# Path bytes that could change which workspace a request reaches once something downstream
+# decodes or normalizes them: encoded dots and slashes, backslashes and ";" path parameters,
+# which httpx leaves as they are (it only collapses literal "/../" segments). "%25" stays
+# allowed: /src paths legitimately carry it.
+_UNSAFE_PATH_BYTES = re.compile(rb"%2e|%2f|%5c|\\|;", re.IGNORECASE)
+
+
+def scope_violation(raw_path: bytes, allowed: FrozenSet[str]) -> Optional[str]:
+    """Why a request path falls outside the workspace allowlist, or ``None`` if it does not.
+
+    Applied to the request httpx is about to send, after its own normalization, so a
+    ``repo_slug`` of ``../other/x`` is judged by the workspace it really reaches. Only the
+    path is read: the query string legitimately carries encoded slashes (branch names,
+    BBQL). Accepted shapes are the ones this client builds: ``/2.0/user`` and
+    ``/2.0/repositories|workspaces/{allowed workspace}/…``; everything else is refused.
+    """
+    path = raw_path.split(b"?", 1)[0]
+    if _UNSAFE_PATH_BYTES.search(path):
+        return "the path contains an encoded separator, a backslash or a ';'"
+    segments = path.decode("ascii", "replace").split("/")
+    if segments[:2] != ["", "2.0"]:
+        return "the path is outside the API"
+    rest = segments[2:]
+    if rest == ["user"]:
+        return None
+    if len(rest) >= 2 and rest[0] in ("repositories", "workspaces"):
+        if rest[1] and is_workspace_allowed(rest[1], allowed):
+            return None
+        return f"workspace {rest[1]!r} is not allowed on this server"
+    return "the path is outside any workspace"
+
+
+def _log_scope_refusal(account_id: Optional[str], reason: str) -> None:
+    audit_logger.warning("scope refused account_id=%s reason=%s", account_id, reason)
+
+
+def _workspace_scope_hook(
+    allowed: FrozenSet[str], account_id: Optional[str], api_base_url: str
+) -> Callable[[httpx.Request], Any]:
+    """httpx request hook enforcing the workspace allowlist on every request sent.
+
+    Runs before each leg of a redirect chain too. A leg without ``Authorization`` — the
+    hop to a pre-signed storage host, which httpx strips the token from — carries no
+    caller credential and is let through, the same criterion as
+    :func:`_raise_authorization_error`. A request that would carry the token to any other
+    origin than the API (an absolute ``next`` link, say) is refused.
+    """
+    api = httpx.URL(api_base_url)
+    api_origin = (api.scheme, api.host, api.port)
+
+    async def enforce(request: httpx.Request) -> None:
+        if "Authorization" not in request.headers:
+            return
+        url = request.url
+        if (url.scheme, url.host, url.port) != api_origin:
+            reason = "the request would carry the token outside the API"
+        else:
+            reason = scope_violation(url.raw_path, allowed)
+        if reason is None:
+            return
+        _log_scope_refusal(account_id, reason)
+        raise AuthorizationError(
+            f"Request refused: {reason}.", account_id=account_id
+        )
+
+    return enforce
+
+
 class IssueTrackerDisabledError(Exception):
     """Raised when an issue endpoint returns 404 because the repository's issue
     tracker is disabled.
@@ -476,6 +545,7 @@ class BitbucketClient:
         workspace: Optional[str],
         *,
         account_id: Optional[str] = None,
+        allowed_workspaces: FrozenSet[str] = frozenset(),
     ) -> "BitbucketClient":
         """Build a client authenticating with a Bitbucket OAuth bearer token.
 
@@ -486,12 +556,19 @@ class BitbucketClient:
                 then pass ``workspace`` explicitly (see :meth:`_resolve_workspace`).
             account_id: Bitbucket account id of the caller, for logs and errors. Never
                 a credential.
+            allowed_workspaces: Normalized slugs this client may reach. Non-empty, every
+                request is checked against them before it is sent.
 
         Returns:
             A client whose 401/403 responses surface as :class:`AuthorizationError`.
         """
         client = cls.__new__(cls)
-        client._init_common(BearerAuthStrategy(token), workspace, account_id=account_id)
+        client._init_common(
+            BearerAuthStrategy(token),
+            workspace,
+            account_id=account_id,
+            allowed_workspaces=allowed_workspaces,
+        )
         return client
 
     def _init_common(
@@ -500,10 +577,12 @@ class BitbucketClient:
         workspace: Optional[str],
         *,
         account_id: Optional[str] = None,
+        allowed_workspaces: FrozenSet[str] = frozenset(),
     ) -> None:
         """Shared construction path for both auth schemes."""
         self.workspace = workspace
         self.account_id = account_id
+        self.allowed_workspaces = allowed_workspaces
         self.auth_scheme = auth.scheme
         self.base_url = "https://api.bitbucket.org/2.0"
 
@@ -518,7 +597,13 @@ class BitbucketClient:
         # Basic-Auth mode a 403 is a legitimate, documented outcome for some endpoints
         # (e.g. get_pipeline_config without admin:repository) and callers already handle
         # it as an httpx.HTTPStatusError. Multi-tenant mode has no such history.
-        event_hooks = {"response": [_raise_authorization_error]} if auth.scheme == "Bearer" else {}
+        event_hooks: Dict[str, list] = (
+            {"response": [_raise_authorization_error]} if auth.scheme == "Bearer" else {}
+        )
+        if allowed_workspaces:
+            event_hooks["request"] = [
+                _workspace_scope_hook(allowed_workspaces, account_id, self.base_url)
+            ]
 
         self.client = httpx.AsyncClient(
             base_url=self.base_url,
@@ -550,6 +635,14 @@ class BitbucketClient:
             raise AuthorizationError(
                 "No default workspace for this identity: pass `workspace` explicitly.",
                 account_id=self.account_id,
+            )
+        # An early, readable refusal; the request hook remains the guarantee, since a
+        # crafted repo_slug could still steer the final path elsewhere.
+        if not is_workspace_allowed(ws, self.allowed_workspaces):
+            reason = f"workspace {ws!r} is not allowed on this server"
+            _log_scope_refusal(self.account_id, reason)
+            raise AuthorizationError(
+                f"Request refused: {reason}.", account_id=self.account_id, workspace=ws
             )
         return ws
 

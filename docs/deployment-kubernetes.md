@@ -48,6 +48,7 @@ refuses a `publicUrl` that is not `https://`, carries a path or ends with a slas
 |---|---|---|
 | `publicUrl` | — (required) | Public origin, e.g. `https://mcp.example.com` |
 | `extraAllowedHosts` / `extraAllowedOrigins` | `[]` | Other names the server is reached by (an internal hostname) |
+| `multiTenant.allowedWorkspaces` | `[]` (any account) | Workspace slugs whose members alone are admitted — set it on any public endpoint |
 | `multiTenant.readOnly` / `.allowDestructive` / `.issuerUrl` | off / off / empty | See the multi-tenant configuration reference |
 | `extraEnv` | `[]` | Any other variable (cache sizes, TTLs, page cap); derived variables are refused |
 | `ingress.enabled` / `.className` / `.annotations` / `.tls` | off | Standard Ingress over the **whole host** — `/.well-known/` must reach the server too |

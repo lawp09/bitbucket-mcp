@@ -123,6 +123,30 @@ def _env_flag(name):
     return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
 
 
+ALLOWED_WORKSPACES_ENV = "BITBUCKET_MULTITENANT_ALLOWED_WORKSPACES"
+
+
+def _allowed_workspaces_from_env(parser):
+    """Read the workspace allowlist; refuse a value that names no workspace.
+
+    A value that parses to nothing (``","``, ``" "``) would otherwise read as "no
+    allowlist" — admitting every Bitbucket account, the opposite of what was asked. An
+    empty value counts as unset, as ``VAR=`` does in env files.
+    """
+    from .auth import parse_allowed_workspaces
+
+    raw = os.environ.get(ALLOWED_WORKSPACES_ENV)
+    if raw is None or raw == "":
+        return frozenset()
+    allowed = parse_allowed_workspaces(raw.split(","))
+    if not allowed:
+        parser.error(
+            f"{ALLOWED_WORKSPACES_ENV} is set but names no workspace; unset it to admit "
+            "any Bitbucket account, or list workspace slugs separated by commas."
+        )
+    return allowed
+
+
 def _build_multi_tenant_config(parser):
     """Build the multi-tenant configuration from the environment.
 
@@ -153,6 +177,7 @@ def _build_multi_tenant_config(parser):
         token_cache_ttl=_env_int("BITBUCKET_TOKEN_CACHE_TTL", 300),
         allow_destructive=_env_flag("BITBUCKET_MULTITENANT_ALLOW_DESTRUCTIVE"),
         read_only=_env_flag("BITBUCKET_MULTITENANT_READ_ONLY"),
+        allowed_workspaces=_allowed_workspaces_from_env(parser),
     )
 
 
@@ -276,6 +301,9 @@ Multi-tenant (--multi-tenant):
                                            (default: 300; 0 = verify on every request)
   BITBUCKET_MULTITENANT_ALLOW_DESTRUCTIVE - Allow destructive tools (default: off)
   BITBUCKET_MULTITENANT_READ_ONLY        - Expose read-only tools only (default: off)
+  BITBUCKET_MULTITENANT_ALLOWED_WORKSPACES - Comma-separated workspace slugs: only their
+                                           members are admitted, only they can be reached
+                                           (default: unset, any Bitbucket account)
 """
     )
 
@@ -366,6 +394,12 @@ Multi-tenant (--multi-tenant):
         print(
             "Warning: BITBUCKET_TOKEN is set but ignored in --multi-tenant mode; "
             "every request authenticates with the caller's own bearer token.",
+            file=sys.stderr,
+        )
+    if multi_tenant_config is None and os.environ.get(ALLOWED_WORKSPACES_ENV):
+        print(
+            f"Warning: {ALLOWED_WORKSPACES_ENV} is set but only applies with "
+            "--multi-tenant; it is ignored here.",
             file=sys.stderr,
         )
 

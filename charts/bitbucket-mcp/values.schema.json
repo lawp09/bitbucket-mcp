@@ -15,7 +15,11 @@
       "properties": {
         "readOnly": {"type": "boolean"},
         "allowDestructive": {"type": "boolean"},
-        "issuerUrl": {"type": "string"}
+        "issuerUrl": {"type": "string"},
+        "allowedWorkspaces": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1, "pattern": "^[A-Za-z0-9_-]+$"}
+        }
       }
     },
     "extraEnv": {"type": "array"},

@@ -47,6 +47,7 @@ def clean_env():
         "BITBUCKET_TOKEN_CACHE_TTL",
         "BITBUCKET_MULTITENANT_ALLOW_DESTRUCTIVE",
         "BITBUCKET_MULTITENANT_READ_ONLY",
+        "BITBUCKET_MULTITENANT_ALLOWED_WORKSPACES",
     )
     saved = {k: os.environ.pop(k, None) for k in keys}
     yield
@@ -457,6 +458,42 @@ def test_multi_tenant_wires_auth_from_the_environment(restore_multi_tenant):
     assert config.allow_destructive is False
     assert mcp._token_verifier is not None
     assert str(mcp.settings.auth.resource_server_url).rstrip("/") == "https://mcp.example.com"
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        (None, frozenset()),
+        ("koiosemployee", frozenset({"koiosemployee"})),
+        (" Acme, beta ,ACME", frozenset({"acme", "beta"})),
+    ],
+)
+def test_multi_tenant_reads_the_workspace_allowlist(restore_multi_tenant, raw, expected):
+    env = {"BITBUCKET_RESOURCE_SERVER_URL": "https://mcp.example.com/mcp"}
+    if raw is not None:
+        env["BITBUCKET_MULTITENANT_ALLOWED_WORKSPACES"] = raw
+    with _Transports(), patch.dict(os.environ, env), patch(CREDS_TARGET):
+        main(["--transport", "http", "--multi-tenant"])
+    assert src.server._multi_tenant.allowed_workspaces == expected
+
+
+@pytest.mark.parametrize("raw", [",", " , ", " "])
+def test_an_allowlist_naming_no_workspace_is_refused(raw):
+    """Read as "unset", it would admit every Bitbucket account: refuse to start instead."""
+    env = {
+        "BITBUCKET_RESOURCE_SERVER_URL": "https://mcp.example.com/mcp",
+        "BITBUCKET_MULTITENANT_ALLOWED_WORKSPACES": raw,
+    }
+    with _Transports(), patch.dict(os.environ, env), patch(CREDS_TARGET):
+        with pytest.raises(SystemExit):
+            main(["--transport", "http", "--multi-tenant"])
+
+
+def test_an_allowlist_without_multi_tenant_is_reported(capsys):
+    env = {"BITBUCKET_MULTITENANT_ALLOWED_WORKSPACES": "acme"}
+    with _Transports(), patch.dict(os.environ, env), patch(CREDS_TARGET):
+        main(["--transport", "http"])
+    assert "only applies with --multi-tenant" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(

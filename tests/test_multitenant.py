@@ -1184,7 +1184,11 @@ def test_default_or_real_external_issuer_is_not_warned_about(caplog, issuer):
     """Only the known dead end warns; a real external server is a legitimate setup."""
     with caplog.at_level(logging.WARNING, logger="src.server"):
         enable_multi_tenant(
-            MultiTenantConfig(resource_server_url="https://mcp.example.com", issuer_url=issuer)
+            MultiTenantConfig(
+                resource_server_url="https://mcp.example.com",
+                issuer_url=issuer,
+                allowed_workspaces=frozenset({"acme"}),
+            )
         )
     assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
 

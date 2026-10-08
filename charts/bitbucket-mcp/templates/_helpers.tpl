@@ -58,6 +58,10 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 - name: BITBUCKET_MULTITENANT_ALLOW_DESTRUCTIVE
   value: "1"
 {{- end }}
+{{- with .allowedWorkspaces }}
+- name: BITBUCKET_MULTITENANT_ALLOWED_WORKSPACES
+  value: {{ join "," . | quote }}
+{{- end }}
 {{- if .issuerUrl }}
 - name: BITBUCKET_OAUTH_ISSUER_URL
   value: {{ .issuerUrl | quote }}

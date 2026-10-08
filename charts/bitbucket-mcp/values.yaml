@@ -16,6 +16,9 @@ multiTenant:
   # decline_pull_request and the comment/task deletions (merge, stop_pipeline and delete_issue*
   # stay disabled there, and the chart has no way to change that file).
   allowDestructive: false
+  # -- Workspace slugs a caller must belong to, and the only ones they can reach. Empty
+  # admits any Bitbucket account — set it on any server reachable from the Internet.
+  allowedWorkspaces: []
   # -- External OAuth issuer. Leave empty: the server then publishes the OAuth metadata
   # itself, pointing at Bitbucket's endpoints (see docs/deployment-modes.md).
   issuerUrl: ""
