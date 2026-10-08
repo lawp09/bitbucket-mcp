@@ -1,0 +1,37 @@
+{{- if .Values.ingress.enabled -}}
+{{- $hostname := include "bitbucket-mcp.publicHostname" . -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "bitbucket-mcp.fullname" . }}
+  labels:
+    {{- include "bitbucket-mcp.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- with .Values.ingress.tls }}
+  tls:
+    {{- range . }}
+    - hosts:
+        - {{ $hostname | quote }}
+      secretName: {{ .secretName }}
+    {{- end }}
+  {{- end }}
+  rules:
+    - host: {{ $hostname | quote }}
+      http:
+        paths:
+          # The whole host, not just /mcp: OAuth discovery lives under /.well-known/.
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "bitbucket-mcp.fullname" . }}
+                port:
+                  name: http
+{{- end }}

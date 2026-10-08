@@ -27,6 +27,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install ".[dev]"
 
+      - name: Set up Helm (chart tests)
+        uses: azure/setup-helm@v5
+        with:
+          version: v4.3.0
+
+      - name: Lint Helm chart
+        run: |
+          for values in charts/bitbucket-mcp/examples/*.yaml; do
+            helm lint charts/bitbucket-mcp -f "$values"
+          done
+
       - name: Run tests
         run: python -m pytest tests/ -v --cov=src --cov-report=term-missing
 
@@ -34,3 +45,81 @@ jobs:
         run: |
           pip install build
           python -m build
+
+  # The release workflow has no dry run: the image must be proven buildable — on arm64 too —
+  # and runnable the way the chart runs it before a tag is pushed.
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build amd64 + arm64
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Load amd64 for the smoke test
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: bitbucket-mcp:ci
+          cache-from: type=gha
+
+      - name: Smoke test (read-only root, chart args and env)
+        run: |
+          docker run -d --name smoke --read-only --tmpfs /tmp --user 1000 --cap-drop ALL \
+            --security-opt no-new-privileges -p 8000:8000 \
+            -e BITBUCKET_RESOURCE_SERVER_URL=https://mcp.example.com/mcp \
+            -e BITBUCKET_ALLOWED_HOSTS=mcp.example.com \
+            -e BITBUCKET_ALLOWED_ORIGINS=https://mcp.example.com \
+            bitbucket-mcp:ci python -m src.main \
+            --transport http --host 0.0.0.0 --port 8000 --stateless --multi-tenant
+          for _ in $(seq 30); do curl -fs http://127.0.0.1:8000/healthz && break; sleep 1; done
+          curl -fs http://127.0.0.1:8000/healthz
+          curl -fs http://127.0.0.1:8000/.well-known/oauth-authorization-server \
+            | python3 -c 'import json,sys; assert json.load(sys.stdin)["issuer"] == "https://mcp.example.com/"'
+          test "$(curl -s -o /dev/stdout -w '%{http_code}' -X POST http://127.0.0.1:8000/mcp | tail -c 3)" = "401"
+
+      - name: Server logs
+        if: always()
+        run: docker logs smoke || true
+
+  # The chart half of the release, against a throwaway registry: package with a version,
+  # push, and check what GHCR will rely on.
+  chart-publish:
+    runs-on: ubuntu-latest
+    services:
+      registry:
+        image: registry:2
+        ports:
+          - 5000:5000
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: azure/setup-helm@v5
+        with:
+          version: v4.3.0
+
+      - name: Package and push the way the release does
+        run: |
+          helm package charts/bitbucket-mcp --version 1.2.3 --app-version 1.2.3 -d dist-chart
+          helm push dist-chart/bitbucket-mcp-1.2.3.tgz oci://localhost:5000/charts --plain-http
+
+      - name: Check the published chart
+        run: |
+          # GHCR links a package to its repository through this annotation, and the release's
+          # GITHUB_TOKEN can only write to a linked package.
+          curl -fs -H 'Accept: application/vnd.oci.image.manifest.v1+json' \
+            http://localhost:5000/v2/charts/bitbucket-mcp/manifests/1.2.3 \
+            | python3 -c 'import json,sys; a = json.load(sys.stdin)["annotations"]; assert a["org.opencontainers.image.source"] == "https://github.com/lawp09/bitbucket-mcp", a'
+          helm template t oci://localhost:5000/charts/bitbucket-mcp --version 1.2.3 --plain-http \
+            --set publicUrl=https://mcp.example.com | grep -q 'image: "ghcr.io/lawp09/bitbucket-mcp:1.2.3"'

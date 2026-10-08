@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Added
+- Each release now publishes a multi-arch image (`ghcr.io/lawp09/bitbucket-mcp`) and a Helm
+  chart (`oci://ghcr.io/lawp09/charts/bitbucket-mcp`) that deploy the multi-tenant HTTP mode
+  on any Kubernetes cluster — k3s, datacenter, GKE — from a single `publicUrl` value; see
+  docs/deployment-kubernetes.md.
+
+### Changed
+- The container image installs only the runtime dependencies, no longer the test tooling.
+- A release tag must now be `vX.Y.Z`; anything else fails before publishing.
+
+### Removed
+- `requirements.txt`, an unused and drifting copy of `pyproject.toml`'s dependencies: use
+  `pip install .` (or `".[dev]"`).
+
 ## [1.27.0] - 2026-10-07
 
 ### Added

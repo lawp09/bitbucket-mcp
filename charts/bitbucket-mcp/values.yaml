@@ -1,0 +1,82 @@
+# -- Public HTTPS origin the server is reached at, e.g. https://mcp.example.com (no path,
+# no trailing slash). Required. The MCP endpoint is <publicUrl>/mcp, and every derived
+# setting comes from it: the OAuth resource identifier, the issuer of the OAuth metadata
+# served under /.well-known/, the Ingress host, and the Host/Origin allowlists.
+publicUrl: ""
+
+# -- Additional Host headers / Origins accepted besides publicUrl's (e.g. an internal name).
+extraAllowedHosts: []
+extraAllowedOrigins: []
+
+multiTenant:
+  # -- Expose read-only tools only.
+  readOnly: false
+  # -- Allow tools flagged destructive (merge, decline, delete_*, stop_pipeline).
+  allowDestructive: false
+  # -- External OAuth issuer. Leave empty: the server then publishes the OAuth metadata
+  # itself, pointing at Bitbucket's endpoints (see docs/deployment-modes.md).
+  issuerUrl: ""
+
+# -- Extra environment variables (cache sizes, TTLs, BITBUCKET_MAX_PAGES_HARD_CAP...).
+# The variables derived from the values above cannot be overridden here.
+extraEnv: []
+
+image:
+  repository: ghcr.io/lawp09/bitbucket-mcp
+  # -- Defaults to the chart's appVersion.
+  tag: ""
+  # -- Empty lets Kubernetes decide: Always for `latest`, IfNotPresent for a version tag.
+  pullPolicy: ""
+
+imagePullSecrets: []
+
+replicaCount: 1
+
+containerPort: 8000
+
+service:
+  type: ClusterIP
+  port: 80
+  annotations: {}
+
+ingress:
+  enabled: false
+  # -- spec.ingressClassName (traefik, nginx...). Leave empty on GKE, which reads the
+  # kubernetes.io/ingress.class annotation instead.
+  className: ""
+  annotations: {}
+  # -- TLS secrets; the host is publicUrl's. Example: [{secretName: mcp-tls}]
+  tls: []
+
+gke:
+  backendConfig:
+    # -- Create a BackendConfig (GKE Ingress only) that health-checks /healthz — the load
+    # balancer's default, GET /, answers 404 here — and raises the backend timeout.
+    enabled: false
+    timeoutSec: 120
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 512Mi
+
+podSecurityContext:
+  runAsNonRoot: true
+  # The image declares its user by name; runAsNonRoot can only verify a numeric UID.
+  runAsUser: 1000
+  runAsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

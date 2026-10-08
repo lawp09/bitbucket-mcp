@@ -41,6 +41,7 @@ dev = [
     "pytest-cov>=6.0.0",
     "pytest-httpx>=0.30.0",
     "respx>=0.22.0",
+    "pyyaml>=6.0",
 ]
 keyring = [
     "keyring>=25.0.0",

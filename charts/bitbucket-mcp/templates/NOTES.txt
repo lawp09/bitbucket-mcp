@@ -1,0 +1,12 @@
+MCP endpoint: {{ include "bitbucket-mcp.publicOrigin" . }}/mcp
+
+Check from outside the cluster once DNS and TLS are in place:
+  curl {{ include "bitbucket-mcp.publicOrigin" . }}/.well-known/oauth-authorization-server
+{{- if not .Values.ingress.enabled }}
+
+No Ingress was created (ingress.enabled=false): route {{ include "bitbucket-mcp.publicHostname" . }}
+to service {{ include "bitbucket-mcp.fullname" . }}:{{ .Values.service.port }} yourself, the whole host including /.well-known/.
+{{- end }}
+
+Adding it to claude.ai: docs/deployment-kubernetes.md and docs/deployment-modes.md in
+https://github.com/lawp09/bitbucket-mcp

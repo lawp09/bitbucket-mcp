@@ -1,0 +1,18 @@
+apiVersion: v2
+name: bitbucket-mcp
+description: >-
+  Bitbucket MCP server in multi-tenant HTTP mode: each caller acts under their own
+  Bitbucket OAuth identity, and the server holds no Bitbucket credential.
+type: application
+# The release workflow packages the chart with the tag's version for both fields, so a
+# published chart always pins the image built from the same tag. A checkout of the repo
+# deploys the image's `latest` tag instead.
+version: 0.0.0-dev
+appVersion: latest
+home: https://github.com/lawp09/bitbucket-mcp
+sources:
+  - https://github.com/lawp09/bitbucket-mcp
+keywords:
+  - mcp
+  - bitbucket
+  - model-context-protocol
