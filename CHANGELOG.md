@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.28.0] - 2026-10-07
+
 ### Added
 - Each release now publishes a multi-arch image (`ghcr.io/lawp09/bitbucket-mcp`) and a Helm
   chart (`oci://ghcr.io/lawp09/charts/bitbucket-mcp`) that deploy the multi-tenant HTTP mode
