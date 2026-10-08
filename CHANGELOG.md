@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+- The claude.ai connector is now verified end to end (claude.ai, Claude Code, per-caller
+  audit) on a Helm deployment; only SSO enforcement and the minimal scope set remain
+  unverified — see docs/deployment-modes.md.
+
 ## [1.28.0] - 2026-10-07
 
 ### Added
