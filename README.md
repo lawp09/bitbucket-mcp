@@ -353,6 +353,17 @@ What this buys you:
 
 See **[docs/deployment-modes.md](docs/deployment-modes.md)** for the full matrix of the three deployment modes and the threat model of each.
 
+#### Kubernetes (k3s, datacenter, GKE)
+
+Each release publishes a multi-arch image (`ghcr.io/lawp09/bitbucket-mcp`) and a Helm chart (`oci://ghcr.io/lawp09/charts/bitbucket-mcp`) that deploy the multi-tenant HTTP mode; `publicUrl` is the only required value:
+
+```bash
+helm upgrade --install bitbucket-mcp oci://ghcr.io/lawp09/charts/bitbucket-mcp --version <version> \
+  -n bitbucket-mcp --create-namespace --set publicUrl=https://mcp.example.com
+```
+
+Ingress, GKE and network-policy notes: [docs/deployment-kubernetes.md](docs/deployment-kubernetes.md).
+
 ## Development
 
 ```bash

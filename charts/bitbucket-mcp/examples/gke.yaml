@@ -1,0 +1,21 @@
+# GKE Ingress (external Application Load Balancer). The static IP and the
+# ManagedCertificate are created outside the chart — see docs/deployment-kubernetes.md.
+publicUrl: https://mcp.example.com
+
+ingress:
+  enabled: true
+  # GKE ignores spec.ingressClassName and reads this annotation instead.
+  className: ""
+  annotations:
+    kubernetes.io/ingress.class: gce
+    kubernetes.io/ingress.global-static-ip-name: bitbucket-mcp-ip
+    networking.gke.io/managed-certificates: bitbucket-mcp-cert
+    kubernetes.io/ingress.allow-http: "false"
+
+service:
+  annotations:
+    cloud.google.com/neg: '{"ingress": true}'
+
+gke:
+  backendConfig:
+    enabled: true

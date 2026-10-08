@@ -1,0 +1,10 @@
+# k3s with its bundled Traefik. Replace the host and the TLS secret with yours.
+publicUrl: https://mcp.example.com
+
+ingress:
+  enabled: true
+  className: traefik
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+  tls:
+    - secretName: mcp-example-com-tls

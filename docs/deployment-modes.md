@@ -182,6 +182,9 @@ a deployed instance.
   their own Bitbucket permissions, but no member's token can exceed the scopes granted to
   the shared client.
 
+To deploy this mode on Kubernetes — image, Helm chart, per-cluster ingress — see
+[deployment-kubernetes.md](deployment-kubernetes.md).
+
 ## Configuration reference (multi-tenant)
 
 | Variable | Default | Purpose |

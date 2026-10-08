@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["publicUrl"],
+  "properties": {
+    "publicUrl": {
+      "type": "string",
+      "description": "Public HTTPS origin, e.g. https://mcp.example.com: https only (bearer tokens travel in headers), no path, no trailing slash.",
+      "pattern": "^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?$"
+    },
+    "extraAllowedHosts": {"type": "array", "items": {"type": "string"}},
+    "extraAllowedOrigins": {"type": "array", "items": {"type": "string"}},
+    "multiTenant": {
+      "type": "object",
+      "properties": {
+        "readOnly": {"type": "boolean"},
+        "allowDestructive": {"type": "boolean"},
+        "issuerUrl": {"type": "string"}
+      }
+    },
+    "extraEnv": {"type": "array"},
+    "replicaCount": {"type": "integer", "minimum": 0},
+    "containerPort": {"type": "integer"}
+  }
+}

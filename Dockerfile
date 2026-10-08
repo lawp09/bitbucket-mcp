@@ -16,11 +16,9 @@ RUN pip install --no-cache-dir uv
 # Create working directory
 WORKDIR /app
 
-# Copy dependency files
-COPY pyproject.toml requirements.txt ./
-
-# Install dependencies using uv
-RUN uv pip install --system -r requirements.txt
+# Runtime dependencies only: the dev extra (test tooling) stays out of the image.
+COPY pyproject.toml ./
+RUN uv pip install --system -r pyproject.toml
 
 # Copy source code
 COPY src/ ./src/

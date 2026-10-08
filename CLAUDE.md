@@ -79,10 +79,16 @@ configs/
 └── tools.json           # Tool enable/disable configuration
 
 .github/workflows/
-├── ci.yml               # CI pipeline (tests + build)
-└── release.yml          # Release pipeline (PyPI + MCP Registry + GitHub Release)
+├── ci.yml               # CI pipeline (tests, chart lint, image smoke test, chart publish check, build)
+└── release.yml          # Release pipeline (PyPI + MCP Registry + GHCR image + Helm chart + GitHub Release)
 
-tests/                   # pytest test suite
+charts/bitbucket-mcp/    # Helm chart (multi-tenant HTTP); examples/k3s-traefik.yaml, examples/gke.yaml
+
+docs/
+├── deployment-kubernetes.md  # Kubernetes deployment guide
+└── deployment-modes.md       # Deployment modes and threat model (stdio, HTTP single/multi-tenant)
+
+tests/                   # pytest test suite (incl. tests/test_helm_chart.py)
 scripts/                 # Shell scripts (build.sh, run.sh)
 server.json              # MCP Registry server manifest
 ```
@@ -195,12 +201,16 @@ All tool responses pass through transformers (`src/utils/transformers.py`) that 
 
 **CI** (`.github/workflows/ci.yml`):
 - **Triggers**: push to `main`, PR targeting `main`
-- **Steps**: Install deps, run pytest with coverage, build package
+- **Job `test`**: install deps + Helm, `helm lint` each `charts/bitbucket-mcp/examples/*.yaml`, pytest with coverage (chart tests included), build package
+- **Job `container`**: build amd64 + arm64 (no push), then smoke test the amd64 image run read-only, as non-root, with all caps dropped and the chart's args and env (`/healthz`, OAuth metadata, `/mcp` answers 401 without a token)
+- **Job `chart-publish`**: package and push the chart to a throwaway `registry:2`, check the `org.opencontainers.image.source` annotation (GHCR uses it to link the package to the repo), and check the rendered image tag
 
 **Release** (`.github/workflows/release.yml`):
 - **Triggers**: git tag push `v*`
-- **Jobs**: `test` → `build` → `publish-pypi` → `publish-mcp-registry` → `github-release`
+- **Jobs**: `test` → `build` (checks the tag is strictly `vX.Y.Z` and the versions match it) → `publish-pypi` → `publish-mcp-registry`, and in parallel `publish-image` (GHCR, amd64 + arm64, `release` environment) → `publish-chart` (Helm OCI to `oci://ghcr.io/lawp09/charts`). `github-release` waits for all of them
 - PyPI via OIDC Trusted Publisher, MCP Registry via `MCP_GITHUB_TOKEN` secret
+- **Partial failure**: re-run the failed jobs, do not re-tag; publications are idempotent
+- **After the first release**: make the GHCR packages `bitbucket-mcp` and `charts/bitbucket-mcp` public, once, by hand
 
 ## Development
 
@@ -237,8 +247,9 @@ async def get_pull_request(...) -> Dict[str, Any]:
 **Dockerfile**:
 - Base: `python:3.12-slim`
 - Package manager: `uv`
+- Deps: runtime only, installed from `pyproject.toml` (`uv pip install -r pyproject.toml`), no dev extra in the image
 - User: `mcpuser` (non-root, UID 1000)
-- Command: `tail -f /dev/null` (stays alive for exec)
+- Command: `tail -f /dev/null` (stays alive for `exec` stdio usage); the Helm chart runs `python -m src.main --transport http --stateless --multi-tenant` instead
 
 **Makefile** detects runtime:
 ```makefile
@@ -290,8 +301,11 @@ mcp-publisher publish server.json
 
 Then: `git tag vX.Y.Z && git push origin vX.Y.Z` → GitHub Actions handles the rest.
 
+The Helm chart has no version to bump: `Chart.yaml` stays `version: 0.0.0-dev` / `appVersion: latest`, and the release workflow packages it with the tag's version.
+
 ## Recent Changes
 
+- Added **Kubernetes deployment**: generic Helm chart (`charts/bitbucket-mcp/`) and multi-arch GHCR image, published per release; only `publicUrl` is required, the rest is derived from it. On GKE, the ingress uses the `kubernetes.io/ingress.class: gce` annotation (GKE ignores `ingressClassName`) and a BackendConfig health check on `/healthz`. `requirements.txt` is removed; the image installs from `pyproject.toml`, not `uv.lock`, which is stale. Guide: `docs/deployment-kubernetes.md`
 - Added **OAuth authorization-server metadata** in multi-tenant mode: `/.well-known/oauth-authorization-server` (RFC 8414) points at Bitbucket's `/site/oauth2/authorize` and `/site/oauth2/access_token`, since Bitbucket publishes none, so the server can be added to claude.ai as a **custom connector** (« Use your own OAuth client », confidential Bitbucket client). The issuer now defaults to the server's own origin instead of `bitbucket.org` (`BITBUCKET_OAUTH_ISSUER_URL` unset); the route is registered at import like `/healthz`, decided per request from `_multi_tenant` (404 otherwise) and reuses the SDK's `OAuthMetadata`/`MetadataHandler`/`cors_middleware`. PKCE `S256` is advertised but not enforced by Bitbucket, so the client secret protects the code; no broker, no store (see `docs/deployment-modes.md`) (v1.27.0, #85)
 - Fixed `get_pipeline_step_logs`, which **503'd on every default call**. The trailing-`max_bytes` request was expressed as an HTTP **suffix range** (`Range: bytes=-N`) and the endpoint's **inline** serving mode rejects that form. Measured live: the endpoint alternates between serving the log **inline** and **307-redirecting to pre-signed storage**, and only the inline mode 503s on a suffix range (storage serves it fine) — so the client cannot choose a form per mode and must send the one both accept, an **absolute** range. Deriving it needs the log size, obtained with a **one-byte ranged `GET`** (`bytes=0-0`, total read from `Content-Range`). **`HEAD` is unusable**: the storage URL is pre-signed for `GET` and answers **403** to a `HEAD` that follows the redirect — the first design was built on `HEAD` and was thrown out on that measurement. The derived window is **open-ended** (`bytes=S-`), not closed: a running step keeps writing between probe and fetch, and a closed window would pin the answer to an ageing offset instead of the real tail; the overshoot is trimmed client-side, so `max_bytes` still holds. Every probe failure (non-2xx, no usable size header, transport error, reported size of 0) falls back to an unranged read with a client-side tail — correct, but it reads the whole log to return its tail. A `416` on a **derived** window reports a size change mid-read rather than blaming a window the caller never chose. `_read_capped_stream` now takes an explicit `mode` (`passthrough`/`carve`/`tail`) instead of a range-header string used for its truthiness, because the fallback needs "keep the tail though no range was sent". **A default call now makes 2 requests**; an explicit `start`/`end` window or `max_bytes=None` still makes 1 and is unchanged, as is the response shape (v1.26.1, #80)
 - Added **multi-tenant HTTP mode** (`--multi-tenant`, requires `--transport http` + `BITBUCKET_RESOURCE_SERVER_URL`) — one process, N users, each under **their own Bitbucket identity**. **Architecture decision: bearer + native Bitbucket OAuth** — the caller's Bitbucket access token arrives as `Authorization: Bearer`, is verified *by use* (`GET /2.0/user` → `account_id` + default workspace from **`/user/workspaces`** — *not* `/user/permissions/workspaces`, retired 2026-04-14 by CHANGE-2770 and answering 410, see #77), then **reused as-is** downstream. No store, no mapping, no new dependency. New `src/auth.py` (`BitbucketTokenVerifier`, `BitbucketAccessToken`, `MultiTenantConfig`, `current_identity`). **`get_client()` stays sync**: the SDK's `auth_context_var` (posed by `AuthContextMiddleware`) is a contextvar, readable synchronously → 0 of ~98 call sites touched. **`_clients` (single-tenant) left strictly intact**; a *separate* `_tenant_clients: WeakKeyDictionary[loop, _TenantClientCache]` holds the LRU+TTL cache keyed `(account_id, workspace)` — loop-keying from #71 preserved. **Eviction never closes a live client**: retired → closed when `_inflight` hits 0 (`_client_scope()` per tool call). **Fail-closed everywhere**, incl. the historical no-loop path (which built a client from `BITBUCKET_TOKEN`). Blocker 4 solved structurally: all 90 sites now go through `BitbucketClient._resolve_workspace()`, so `workspace=None` = the caller's workspace (or a clear error when the identity has 0/N memberships). Audit log `bitbucket_mcp.audit`; destructive tools off by default (policy derived from `_classify()`, no second list). **SDK caveat**: `enable_multi_tenant()` assigns `mcp.settings.auth` + the private `mcp._token_verifier` post-construction (the constructor rejects one without the other, and the singleton is built at import) — guard test included. **RAT/WAT unsupported** (no `account_id`). Transport-level integration test pushes 2 bearer identities through the real ASGI stack — the only thing that proves the contextvar survives the SDK's 3 layers of anyio task spawns (v1.26.0, #72)
