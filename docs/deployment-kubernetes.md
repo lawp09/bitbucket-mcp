@@ -1,8 +1,12 @@
 # Deploying on Kubernetes
 
-One image and one Helm chart cover every cluster — k3s, an on-premise datacenter, GKE. Both
-are generic: what differs per cluster (hostname, TLS, ingress class, network policies) lives
-in that cluster's own values file, kept in its infrastructure repository rather than here.
+One image and one Helm chart are meant to cover every cluster — k3s, an on-premise
+datacenter, GKE. Both are generic: what differs per cluster (hostname, TLS, ingress class,
+network policies) lives in that cluster's own values file, kept in its infrastructure
+repository rather than here. **Verified live on k3s only** (Traefik behind a Cloudflare
+Tunnel, 2026-10-07: pod healthy, OAuth discovery reachable from the Internet, claude.ai
+connector connected and a tool call through it). The GKE and datacenter setups below are
+checked by `helm lint` and rendering tests in CI, not yet by a real deployment.
 
 The chart runs **mode C**, multi-tenant HTTP: each caller presents their own Bitbucket OAuth
 token and the server holds no Bitbucket credential (see [deployment-modes.md](deployment-modes.md)).
@@ -10,8 +14,8 @@ There is no Secret to create.
 
 ## Artifacts
 
-Each `v*` release tag publishes, after the version checks and behind the `release`
-environment:
+Each `vX.Y.Z` release tag publishes, after the version checks (the image behind the
+`release` environment, like PyPI; the chart right after the image):
 
 | Artifact | Reference |
 |---|---|
@@ -54,6 +58,9 @@ The pod runs as UID 1000 with a read-only root filesystem, no capabilities, no s
 account token, and probes on `/healthz` — which, unlike `/mcp`, answers whatever the `Host`
 header, so kubelet and load-balancer probes pass the host allowlist.
 
+`replicaCount` can go above 1 — the server is stateless — but the token and client caches
+are per pod: each replica verifies a token on its own first request.
+
 ## Per cluster
 
 Ready-to-adapt values files live in [`charts/bitbucket-mcp/examples/`](../charts/bitbucket-mcp/examples/).
@@ -94,7 +101,9 @@ controller's class and the TLS secret or certificate annotations it uses (cert-m
 The chart creates none: which peers may reach the pod is cluster-specific. On a cluster
 with a default-deny policy, the pod needs ingress from the ingress controller (on GKE, from
 the load balancer ranges `130.211.0.0/22` and `35.191.0.0/16`) and egress to DNS and to
-`api.bitbucket.org` on 443. A starting point, for a controller in namespace `traefik`:
+HTTPS. Keep the HTTPS egress broad rather than pinned to `api.bitbucket.org`: pipeline logs
+of completed steps redirect to a pre-signed storage host, which a single-host rule would
+break. A starting point, for a controller in namespace `traefik`:
 
 ```yaml
 apiVersion: networking.k8s.io/v1
@@ -121,7 +130,12 @@ spec:
       ports:
         - {port: 53, protocol: UDP}
         - {port: 53, protocol: TCP}
-    - ports:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            # Private, CGNAT and link-local (cloud metadata) ranges stay closed.
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, 169.254.0.0/16]
+      ports:
         - {port: 443, protocol: TCP}
 ```
 

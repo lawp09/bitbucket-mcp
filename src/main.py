@@ -126,7 +126,7 @@ def _env_flag(name):
 def _build_multi_tenant_config(parser):
     """Build the multi-tenant configuration from the environment.
 
-    ``BITBUCKET_RESOURCE_SERVER_URL`` is mandatory: it is this server's public URL, used
+    ``BITBUCKET_RESOURCE_SERVER_URL`` is mandatory: it is the public URL of the MCP endpoint, used
     as the OAuth resource identifier and as the base of the protected-resource metadata
     the SDK advertises in its ``WWW-Authenticate`` challenges. There is no sane default —
     guessing it would hand clients a wrong discovery document.
@@ -136,8 +136,9 @@ def _build_multi_tenant_config(parser):
     resource_server_url = os.environ.get("BITBUCKET_RESOURCE_SERVER_URL", "").strip()
     if not resource_server_url:
         parser.error(
-            "--multi-tenant requires BITBUCKET_RESOURCE_SERVER_URL (this server's public "
-            "URL, e.g. https://mcp.example.com), used as the OAuth resource identifier."
+            "--multi-tenant requires BITBUCKET_RESOURCE_SERVER_URL (the public URL of the "
+            "MCP endpoint, e.g. https://mcp.example.com/mcp), used as the OAuth resource "
+            "identifier."
         )
 
     return MultiTenantConfig(
@@ -251,7 +252,7 @@ Examples:
   python -m src.main --transport http --port 8080 --stateless
 
   # Multi-tenant: every caller brings their own Bitbucket OAuth bearer token
-  BITBUCKET_RESOURCE_SERVER_URL=https://mcp.example.com \\
+  BITBUCKET_RESOURCE_SERVER_URL=https://mcp.example.com/mcp \\
     python -m src.main --transport http --port 8080 --stateless --multi-tenant
 
 Environment variables required (single-tenant modes only):
@@ -265,7 +266,7 @@ Optional (HTTP transport):
   BITBUCKET_MAX_PAGES_HARD_CAP  - Max pages per tool call in stateless mode (default: 10)
 
 Multi-tenant (--multi-tenant):
-  BITBUCKET_RESOURCE_SERVER_URL          - REQUIRED. This server's public URL
+  BITBUCKET_RESOURCE_SERVER_URL          - REQUIRED. Public URL of the MCP endpoint
   BITBUCKET_OAUTH_ISSUER_URL             - OAuth issuer (default: this server's origin,
                                            which then serves the issuer metadata)
   BITBUCKET_CLIENT_CACHE_SIZE            - Max cached per-identity clients (default: 128)
