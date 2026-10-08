@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Security
+- Multi-tenant: `BITBUCKET_MULTITENANT_ALLOWED_WORKSPACES` (Helm `multiTenant.allowedWorkspaces`)
+  admits only members of the listed workspaces and blocks any request reaching another one,
+  checked on the final request path; unset, any Bitbucket account is still admitted, now with
+  a startup warning — see docs/deployment-modes.md, mode C.
+
 ### Changed
 - The claude.ai connector is verified live on a Helm deployment, with what remains unverified
   listed — see docs/deployment-modes.md, « Connecting from claude.ai and Claude Code ».

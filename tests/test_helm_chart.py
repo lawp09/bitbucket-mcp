@@ -109,6 +109,28 @@ def test_multi_tenant_flags_become_env():
     assert env["BITBUCKET_OAUTH_ISSUER_URL"] == "https://idp.example.com"
 
 
+def test_workspace_allowlist_becomes_env_only_when_set():
+    assert "BITBUCKET_MULTITENANT_ALLOWED_WORKSPACES" not in env_of(
+        render("--set", f"publicUrl={PUBLIC_URL}")
+    )
+    env = env_of(
+        render(
+            "--set", f"publicUrl={PUBLIC_URL}",
+            "--set", "multiTenant.allowedWorkspaces={koiosemployee,acme}",
+        )
+    )
+    assert env["BITBUCKET_MULTITENANT_ALLOWED_WORKSPACES"] == "koiosemployee,acme"
+
+
+@pytest.mark.parametrize("entry", ["", "a b", "a/b"])
+def test_workspace_allowlist_rejects_a_malformed_entry(entry):
+    result = helm_template(
+        "--set", f"publicUrl={PUBLIC_URL}",
+        "--set-string", f"multiTenant.allowedWorkspaces[0]={entry}",
+    )
+    assert result.returncode != 0
+
+
 @pytest.mark.parametrize(
     "public_url",
     ["", "https://mcp.example.com/", "https://mcp.example.com/mcp", "http://mcp.example.com"],

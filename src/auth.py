@@ -27,7 +27,7 @@ import hashlib
 import logging
 import time
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
+from typing import Dict, FrozenSet, Iterable, List, Optional, Sequence, Tuple
 
 import httpx
 from mcp.server.auth.middleware.auth_context import get_access_token
@@ -37,7 +37,20 @@ from pydantic import AnyHttpUrl, Field
 
 logger = logging.getLogger(__name__)
 
+# Who-did-what log of the multi-tenant mode. Defined once, used by the server (tool calls)
+# and by the admission and scope gates (refusals).
+AUDIT_LOGGER_NAME = "bitbucket_mcp.audit"
+audit_logger = logging.getLogger(AUDIT_LOGGER_NAME)
+
 BITBUCKET_API_BASE = "https://api.bitbucket.org/2.0"
+
+# Membership listing with a workspace allowlist: 5 pages of 100. Past that the list is
+# treated as incomplete — admission still works, but no default workspace is assumed.
+MAX_MEMBERSHIP_PAGES = 5
+# A substantive admission refusal (no allowed membership) is remembered this long, so a
+# refused account does not cost two Bitbucket calls per request. Never longer than the
+# verification cache TTL, and off when that TTL is 0.
+REFUSAL_CACHE_TTL = 60  # seconds
 
 # Bitbucket's OAuth endpoints. Bitbucket publishes no RFC 8414 metadata for them, so this
 # server advertises them under its own issuer (see build_authorization_server_metadata).
@@ -113,6 +126,9 @@ class MultiTenantConfig:
     allow_destructive: bool = False
     #: Expose only tools flagged ``readOnlyHint`` — strictest posture.
     read_only: bool = False
+    #: Workspaces (normalized slugs) a caller must belong to and may act on. Empty means
+    #: no restriction: any Bitbucket account is admitted (see docs/deployment-modes.md).
+    allowed_workspaces: FrozenSet[str] = frozenset()
 
     @property
     def origin(self) -> str:
@@ -169,6 +185,45 @@ def token_fingerprint(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
+def normalize_workspace(slug: str) -> str:
+    """Canonical form of a workspace slug for comparisons: trimmed, lower-cased."""
+    return slug.strip().lower()
+
+
+def parse_allowed_workspaces(values: Iterable[str]) -> FrozenSet[str]:
+    """Normalize an allowlist, dropping blanks. Empty result means no restriction."""
+    return frozenset(slug for slug in map(normalize_workspace, values) if slug)
+
+
+def is_workspace_allowed(workspace: Optional[str], allowed: FrozenSet[str]) -> bool:
+    """The one rule both gates apply: admission (memberships) and scope (each request).
+
+    An empty allowlist allows everything. Otherwise only a listed slug passes — a workspace
+    UUID (``{…}``) never equals a slug, so it is refused rather than resolved.
+    """
+    if not allowed:
+        return True
+    return bool(workspace) and normalize_workspace(workspace) in allowed
+
+
+def admit(
+    memberships: Sequence[str], complete: bool, allowed: FrozenSet[str]
+) -> Tuple[bool, Optional[str]]:
+    """Decide admission and the default workspace from a caller's memberships.
+
+    Returns ``(admitted, default_workspace)``. Without an allowlist every caller is
+    admitted and a single membership becomes the default. With one, only callers holding
+    an allowed membership are admitted, and the default is chosen among those — only when
+    the listing is complete, since an unseen page could hold a second candidate.
+    """
+    if not allowed:
+        return True, (memberships[0] if len(memberships) == 1 else None)
+    eligible = [slug for slug in memberships if is_workspace_allowed(slug, allowed)]
+    if not eligible:
+        return False, None
+    return True, (eligible[0] if complete and len(eligible) == 1 else None)
+
+
 class BitbucketTokenVerifier:
     """Verify a bearer token against Bitbucket and derive the caller's identity.
 
@@ -180,6 +235,9 @@ class BitbucketTokenVerifier:
     The cache TTL is also the **revocation window**: a token revoked on Bitbucket's side
     keeps working until its cached verification expires. Set the TTL to 0 to verify on
     every request.
+
+    With ``allowed_workspaces``, a caller is admitted only if they belong to one of those
+    workspaces; a refusal is a ``None`` (hence a 401), never a cached identity.
     """
 
     def __init__(
@@ -189,11 +247,16 @@ class BitbucketTokenVerifier:
         cache_size: int = DEFAULT_TOKEN_CACHE_SIZE,
         base_url: str = BITBUCKET_API_BASE,
         timeout: float = 10.0,
+        allowed_workspaces: FrozenSet[str] = frozenset(),
     ):
         self._cache_ttl = max(0, cache_ttl)
         self._cache_size = max(1, cache_size)
         self._base_url = base_url
         self._timeout = timeout
+        self._allowed_workspaces = allowed_workspaces
+        # fingerprint -> expires_at of a substantive admission refusal. Kept apart from the
+        # identity cache: it holds no identity, and cache_size() must not count it.
+        self._refused: Dict[str, float] = {}
         # fingerprint -> (expires_at, BitbucketAccessToken). Insertion-ordered dict used
         # as an LRU: re-inserting on hit moves the entry to the end.
         self._cache: Dict[str, Tuple[float, BitbucketAccessToken]] = {}
@@ -229,6 +292,24 @@ class BitbucketTokenVerifier:
         """Number of cached verifications — exposed for tests and diagnostics."""
         return len(self._cache)
 
+    def _is_refused(self, fingerprint: str) -> bool:
+        expires_at = self._refused.get(fingerprint)
+        if expires_at is None:
+            return False
+        if expires_at <= time.monotonic():
+            self._refused.pop(fingerprint, None)
+            return False
+        return True
+
+    def _remember_refusal(self, fingerprint: str) -> None:
+        ttl = min(REFUSAL_CACHE_TTL, self._cache_ttl)
+        if ttl <= 0:
+            return
+        self._refused.pop(fingerprint, None)
+        self._refused[fingerprint] = time.monotonic() + ttl
+        while len(self._refused) > self._cache_size:
+            self._refused.pop(next(iter(self._refused)))
+
     # ----- verification ------------------------------------------------------
 
     async def verify_token(self, token: str) -> Optional[BitbucketAccessToken]:
@@ -242,6 +323,8 @@ class BitbucketTokenVerifier:
         cached = self._cache_get(fingerprint)
         if cached is not None:
             return cached
+        if self._is_refused(fingerprint):
+            return None
 
         # De-duplicate concurrent first-time verifications of the same token.
         pending = self._inflight.get(fingerprint)
@@ -291,7 +374,7 @@ class BitbucketTokenVerifier:
                     return None
                 response.raise_for_status()
                 user = response.json()
-                workspace = await self._resolve_default_workspace(client, headers)
+                listing = await self._list_workspaces(client, headers)
         # ValueError covers a non-JSON body behind a 200 (a proxy error page, say):
         # json.JSONDecodeError is a ValueError, not an httpx.HTTPError. Letting it escape
         # would surface as an unhandled exception in the SDK's BearerAuthBackend — which
@@ -309,6 +392,10 @@ class BitbucketTokenVerifier:
             logger.warning(
                 "Bitbucket returned no account_id for token=%s...; rejecting", fingerprint[:12]
             )
+            return None
+
+        admitted, workspace = self._admit(str(account_id), fingerprint, listing)
+        if not admitted:
             return None
 
         identity = BitbucketIdentity(
@@ -332,6 +419,46 @@ class BitbucketTokenVerifier:
         )
         return access_token
 
+    def _admit(
+        self,
+        account_id: str,
+        fingerprint: str,
+        listing: Optional[Tuple[List[str], bool]],
+    ) -> Tuple[bool, Optional[str]]:
+        """Apply the workspace allowlist to a verified caller; audit every refusal.
+
+        Only a verdict on the caller — a complete listing with no allowed membership — is
+        remembered. A listing that failed or stopped short says nothing about them, so it
+        is refused (fail closed while an allowlist is set) but verified again next time.
+        """
+        if listing is None and self._allowed_workspaces:
+            audit_logger.warning(
+                "admission refused account_id=%s reason=memberships could not be listed",
+                account_id,
+            )
+            return False, None
+        memberships, complete = listing if listing is not None else ([], True)
+        admitted, workspace = admit(memberships, complete, self._allowed_workspaces)
+        if not admitted:
+            if complete:
+                # Remembered before the in-flight future resolves, so concurrent waiters
+                # share this one refusal and its single audit line.
+                self._remember_refusal(fingerprint)
+            audit_logger.warning(
+                "admission refused account_id=%s reason=%s",
+                account_id,
+                "no membership in an allowed workspace"
+                if complete
+                else "no allowed workspace among the memberships listed",
+            )
+            return False, None
+        if workspace is None and memberships:
+            logger.info(
+                "Caller has %d workspace memberships; no default workspace will be assumed",
+                len(memberships),
+            )
+        return True, workspace
+
     def _log_workspace_endpoint_gone(self) -> None:
         """Report a 410 on the workspace listing, at most once an hour.
 
@@ -351,20 +478,28 @@ class BitbucketTokenVerifier:
         if last is not None and now - last < WORKSPACE_GONE_LOG_INTERVAL:
             return
         self._workspace_gone_logged_at = now
+        consequence = (
+            "Every caller is refused while the workspace allowlist is set."
+            if self._allowed_workspaces
+            else "Callers keep authenticating, but no default workspace can be resolved — "
+            "every tool call must name its workspace."
+        )
         logger.error(
             "Workspace listing endpoint returned 410 Gone: it has been retired "
-            "(see Atlassian CHANGE-2770). Callers keep authenticating, but no default "
-            "workspace can be resolved — every tool call must name its workspace."
+            "(see Atlassian CHANGE-2770). %s",
+            consequence,
         )
 
-    async def _resolve_default_workspace(
+    async def _list_workspaces(
         self, client: httpx.AsyncClient, headers: Dict[str, str]
-    ) -> Optional[str]:
-        """Resolve the caller's default workspace from their memberships.
+    ) -> Optional[Tuple[List[str], bool]]:
+        """List the caller's workspace memberships as ``(slugs, complete)``.
 
-        Exactly one membership -> that workspace becomes the caller's default, which is
-        what makes ``workspace=None`` resolve to *their* workspace rather than the
-        process one. Zero or several -> ``None``, and calls must name their workspace.
+        ``None`` when they cannot be listed (410, any other error status, transport or
+        JSON failure). One page of 100 without an allowlist — enough to tell "exactly one"
+        from "several". With an allowlist, ``next`` links are followed up to
+        ``MAX_MEMBERSHIP_PAGES`` so that a member is not refused for an unseen page; a
+        ``next`` link to another host is never followed, since it would carry the token.
 
         Endpoint: ``/user/workspaces``. NOT ``/user/permissions/workspaces`` nor
         ``/workspaces``, both removed on 2026-04-14 (Atlassian CHANGE-2770, the
@@ -372,28 +507,34 @@ class BitbucketTokenVerifier:
         The replacement returns the same ``values[].workspace.slug`` shape and honours
         ``pagelen`` identically, so only the path differs.
         """
+        api = httpx.URL(self._base_url)
+        max_pages = MAX_MEMBERSHIP_PAGES if self._allowed_workspaces else 1
+        url: str = "/user/workspaces"
+        params: Optional[Dict[str, int]] = {"pagelen": 100}
+        slugs: List[str] = []
         try:
-            response = await client.get(
-                "/user/workspaces", headers=headers, params={"pagelen": 100}
-            )
-            if response.status_code == 410:
-                self._log_workspace_endpoint_gone()
-                return None
-            if response.status_code >= 400:
-                return None
-            values = response.json().get("values", []) or []
-        except (httpx.HTTPError, ValueError):
+            for _ in range(max_pages):
+                response = await client.get(url, headers=headers, params=params)
+                if response.status_code == 410:
+                    self._log_workspace_endpoint_gone()
+                    return None
+                if response.status_code >= 400:
+                    return None
+                body = response.json()
+                for entry in body.get("values", []) or []:
+                    slug = (entry.get("workspace") or {}).get("slug")
+                    if slug and slug not in slugs:
+                        slugs.append(slug)
+                next_url = body.get("next")
+                if not next_url:
+                    return slugs, True
+                link = httpx.URL(next_url)
+                if (link.scheme, link.host, link.port) != (api.scheme, api.host, api.port):
+                    return slugs, False
+                url, params = next_url, None
+        # InvalidURL is not an HTTPError, and a non-string `next` or an unexpected body
+        # shape raises TypeError / AttributeError: all mean the listing cannot be trusted,
+        # never an unhandled error in the auth backend.
+        except (httpx.HTTPError, httpx.InvalidURL, ValueError, TypeError, AttributeError):
             return None
-
-        slugs = []
-        for entry in values:
-            slug = (entry.get("workspace") or {}).get("slug")
-            if slug and slug not in slugs:
-                slugs.append(slug)
-        if len(slugs) == 1:
-            return slugs[0]
-        logger.info(
-            "Caller has %d workspace memberships; no default workspace will be assumed",
-            len(slugs),
-        )
-        return None
+        return slugs, False

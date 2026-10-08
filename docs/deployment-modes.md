@@ -87,6 +87,7 @@ recommended value, the MCP endpoint's URL.
 | A rotated token still being used | The cached client stores the fingerprint of the token it was built with; a request presenting a different token rebuilds the client instead of reusing the stale credential, and *replaces* the identity's cache entry rather than adding one. |
 | Unbounded memory from N identities | The client cache is LRU + TTL bounded (`BITBUCKET_CLIENT_CACHE_SIZE`, default 128; `BITBUCKET_CLIENT_CACHE_TTL`, default 900 s) and closes evicted clients — but only once no in-flight request is using them. |
 | Destructive actions by an unvetted caller | Tools flagged `destructiveHint` are refused unless `BITBUCKET_MULTITENANT_ALLOW_DESTRUCTIVE=1` — on top of `configs/tools.json`, which already disables `merge`, `stop_pipeline` and `delete_issue*`; the flag therefore unlocks `decline_pull_request`, `delete_pull_request_comment` and `delete_pull_request_task`. `BITBUCKET_MULTITENANT_READ_ONLY=1` narrows everything to `readOnlyHint` tools. |
+| Strangers using a public endpoint | `BITBUCKET_MULTITENANT_ALLOWED_WORKSPACES` admits only members of the listed workspaces (others get `401`) and refuses any request reaching another workspace — checked on the final request path, so a crafted `repo_slug` cannot route around it. Unset, any Bitbucket account is admitted (logged as a warning at startup). |
 | No attribution | Every tool call is logged to `bitbucket_mcp.audit` with the tool name, `account_id` and workspace. Never with credentials or arguments. |
 | Quota exhaustion across tenants | Bitbucket meters authenticated calls per user, and each call runs under the caller's own token, so tenants do not share a quota. `BITBUCKET_MAX_PAGES_HARD_CAP` bounds amplification per call. |
 
@@ -102,13 +103,27 @@ recommended value, the MCP endpoint's URL.
   here works against the Bitbucket API directly. Conforming would take an OAuth broker that
   issues its own tokens and keeps the Bitbucket ones server-side — the design rejected in
   #85, to revisit if conformance matters more than statelessness.
-- **Any Bitbucket account can use the server.** There is no allowlist of accounts or
-  workspaces: holding a valid Bitbucket user token is the whole admission test. Someone
-  outside your workspace sees none of your private data, but uses your server — its tools, its
-  egress IP, its rate budget — against whatever their own account reaches. Network
-  filtering helps only for clients you control: a claude.ai connector must stay reachable
-  from Anthropic's servers, which serve every claude.ai user. The real fix is an allowlist
-  of workspaces in the server; it does not exist yet.
+- **Without an allowlist, any Bitbucket account can use the server.** Unless
+  `BITBUCKET_MULTITENANT_ALLOWED_WORKSPACES` is set, holding a valid Bitbucket user token
+  is the whole admission test: someone outside your workspace sees none of your private
+  data, but uses your server — its tools, its egress IP, its rate budget — against
+  whatever their own account reaches. Network filtering does not replace the allowlist: a
+  claude.ai connector must stay reachable from Anthropic's servers, which serve every
+  claude.ai user. Set it on any server reachable from the Internet.
+- **The allowlist depends on listing memberships.** Admission reads
+  `/2.0/user/workspaces`, so the OAuth client needs a scope that lets it answer (verified
+  with *Account* and *Workspace membership* read). If Bitbucket cannot list them — outage,
+  missing scope, a retired endpoint — every caller is refused until it can: a `401` that a
+  client may answer by re-authorizing. A refused outsider is remembered for up to 60
+  seconds (never longer than `BITBUCKET_TOKEN_CACHE_TTL`) rather than verified on every
+  request.
+- **The allowlist refuses some legitimate requests by design.** The scope check reads the
+  final request path, so it refuses what it cannot vouch for: a workspace named by UUID
+  (`{…}`) instead of its slug, a file path containing `\`, a commit or branch reference
+  containing `;` or written pre-encoded (`feature%2Fx`), and any request that would carry
+  the token to another host. A pull request from a fork in another workspace
+  has not been tested: if Bitbucket redirects its diff through the fork's workspace, that
+  diff is refused rather than served.
 - **Write tools are open to every caller.** Only *destructive* tools are refused by default:
   the 20 other write tools enabled in `configs/tools.json` — comment, approve, create or
   update a pull request, run a pipeline, create an issue… — run for anyone who connects,
@@ -120,16 +135,18 @@ recommended value, the MCP endpoint's URL.
   whether a rejected token counts as anonymous is not documented. Put a rate limit in
   front of a public endpoint rather than find out.
 - **Revocation happens at Bitbucket, and only cuts data access.** The server keeps no
-  session it could close and admits any valid Bitbucket user token (see above), so
-  revoking a member's authorization of the OAuth client only stops the tokens issued to
-  that client. Removing them from the workspace cuts them off from its data — not from the
-  server. Whether rotating the client secret invalidates tokens already issued has not
+  session it could close and admits any valid Bitbucket user token — of a member of an
+  allowed workspace, when the allowlist is set (see above) — so revoking a member's authorization of the OAuth client
+  only stops the tokens issued to that client. Removing them from the workspace cuts them
+  off from its data — and, with an allowlist, from the server once their verification
+  expires (`BITBUCKET_TOKEN_CACHE_TTL`). Whether rotating the client secret invalidates tokens already issued has not
   been verified; at worst they live out their 2 hours.
 - **The audit log names people.** `bitbucket_mcp.audit` lines carry the caller's
   `account_id` and go to stderr, so into whatever collects the container's logs; retention
   is that system's.
-- **Refused calls leave no audit line.** A tool refused by the read-only or destructive
-  policy fails before it is logged to `bitbucket_mcp.audit`.
+- **Policy refusals leave no audit line.** A tool refused by the read-only or destructive
+  policy fails before it is logged to `bitbucket_mcp.audit`; admission and workspace
+  refusals, on the contrary, are logged there as warnings.
 - **Revocation lag.** A verified token is cached for `BITBUCKET_TOKEN_CACHE_TTL` seconds
   (default 300). A token revoked on Bitbucket's side keeps working until that entry
   expires. Set `BITBUCKET_TOKEN_CACHE_TTL=0` to verify on every request, at the cost of two
@@ -249,3 +266,4 @@ To deploy this mode on Kubernetes — image, Helm chart, per-cluster ingress —
 | `BITBUCKET_TOKEN_CACHE_TTL` | `300` | Verification TTL — **the revocation window**; `0` disables caching |
 | `BITBUCKET_MULTITENANT_ALLOW_DESTRUCTIVE` | off | Allow `destructiveHint` tools |
 | `BITBUCKET_MULTITENANT_READ_ONLY` | off | Expose `readOnlyHint` tools only |
+| `BITBUCKET_MULTITENANT_ALLOWED_WORKSPACES` | unset (any account) | Comma-separated workspace slugs: only their members are admitted, only they can be reached. Set but naming no workspace refuses to start |

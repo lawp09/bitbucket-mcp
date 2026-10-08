@@ -349,6 +349,7 @@ What this buys you:
 | `BITBUCKET_TOKEN_CACHE_SIZE` / `_TTL` | `256` / `300` | Bound on cached token verifications. The TTL is the **revocation window** — set it to `0` to verify every request |
 | `BITBUCKET_MULTITENANT_ALLOW_DESTRUCTIVE` | *(off)* | Allow the destructive tools that `configs/tools.json` enables — by default `decline_pull_request`, `delete_pull_request_comment`, `delete_pull_request_task`; `merge`, `stop_pipeline` and `delete_issue*` stay disabled there |
 | `BITBUCKET_MULTITENANT_READ_ONLY` | *(off)* | Expose read-only tools only |
+| `BITBUCKET_MULTITENANT_ALLOWED_WORKSPACES` | *(unset: any account)* | Comma-separated workspace slugs — only their members are admitted, and no call can reach another workspace. **Set it on any public endpoint** |
 
 > **Spec deviation**: the caller's Bitbucket token is accepted without an audience check and forwarded upstream as-is, which the MCP authorization spec (2025-11-25) forbids — trade-offs and residual risks in [docs/deployment-modes.md](docs/deployment-modes.md#c--http-multi-tenant).
 

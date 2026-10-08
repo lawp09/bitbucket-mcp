@@ -25,6 +25,7 @@ from .auth import (
     MultiTenantConfig,
     DEFAULT_CLIENT_CACHE_SIZE,
     DEFAULT_CLIENT_CACHE_TTL,
+    audit_logger,
     build_authorization_server_metadata,
     current_identity,
     token_fingerprint,
@@ -499,7 +500,6 @@ def get_client() -> BitbucketClient:
 #: Active multi-tenant configuration, or None for the single-user default.
 _multi_tenant: Optional[MultiTenantConfig] = None
 
-audit_logger = logging.getLogger("bitbucket_mcp.audit")
 
 #: Clients used by the tool call currently being served, so an LRU eviction cannot close
 #: a client under a live request. Set per call by :func:`_client_scope`.
@@ -695,6 +695,7 @@ def enable_multi_tenant(config: MultiTenantConfig) -> BitbucketTokenVerifier:
     verifier = BitbucketTokenVerifier(
         cache_ttl=config.token_cache_ttl,
         cache_size=config.token_cache_size,
+        allowed_workspaces=config.allowed_workspaces,
     )
     mcp.settings.auth = AuthSettings(
         issuer_url=config.effective_issuer_url,
@@ -713,6 +714,15 @@ def enable_multi_tenant(config: MultiTenantConfig) -> BitbucketTokenVerifier:
         config.read_only,
         config.allow_destructive,
     )
+    if config.allowed_workspaces:
+        logger.info(
+            "Workspace allowlist: %s", ", ".join(sorted(config.allowed_workspaces))
+        )
+    else:
+        logger.warning(
+            "No workspace allowlist: any Bitbucket account is admitted. Set "
+            "BITBUCKET_MULTITENANT_ALLOWED_WORKSPACES to restrict access."
+        )
     if not config.serves_authorization_metadata:
         message = (
             "Issuer %s is not this server's origin (%s): /.well-known/oauth-authorization-server "
@@ -761,7 +771,10 @@ def _get_tenant_client() -> BitbucketClient:
     client = cache.get(key, fingerprint)
     if client is None:
         client = BitbucketClient.from_bearer(
-            token.token, identity.workspace, account_id=identity.account_id
+            token.token,
+            identity.workspace,
+            account_id=identity.account_id,
+            allowed_workspaces=_multi_tenant.allowed_workspaces,
         )
         cache.put(key, fingerprint, client)
     _acquire(client)
