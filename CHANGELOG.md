@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.29.0] - 2026-10-08
+
 ### Security
 - Multi-tenant: `BITBUCKET_MULTITENANT_ALLOWED_WORKSPACES` (Helm `multiTenant.allowedWorkspaces`)
   admits only members of the listed workspaces and blocks any request reaching another one,
