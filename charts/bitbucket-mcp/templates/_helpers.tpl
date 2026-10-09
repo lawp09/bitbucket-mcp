@@ -81,3 +81,12 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- end -}}
 {{- end -}}
 {{- end -}}
+
+{{/* The sleep counts against the grace period: at equality, SIGTERM would leave no time for in-flight requests. */}}
+{{- define "bitbucket-mcp.validateShutdown" -}}
+{{- $sleep := int .Values.preStopSleepSeconds -}}
+{{- $grace := int .Values.terminationGracePeriodSeconds -}}
+{{- if and (gt $sleep 0) (le $grace $sleep) -}}
+{{- fail (printf "terminationGracePeriodSeconds (%d) must be larger than preStopSleepSeconds (%d)" $grace $sleep) -}}
+{{- end -}}
+{{- end -}}

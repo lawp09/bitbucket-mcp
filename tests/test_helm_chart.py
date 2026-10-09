@@ -186,6 +186,76 @@ def test_pod_runs_the_http_server_hardened():
     assert {"name": "tmp", "mountPath": "/tmp"} in c["volumeMounts"]
 
 
+def pod_spec(resources: dict) -> dict:
+    return resources["Deployment"]["spec"]["template"]["spec"]
+
+
+def test_pod_keeps_serving_while_it_leaves_the_endpoints():
+    """Without the sleep, a rolling update answers 502 until Traefik drops the old pod (#95)."""
+    resources = render("--set", f"publicUrl={PUBLIC_URL}")
+
+    # Native sleep action: the image needs no `sleep` binary and nothing is exec'd.
+    assert container(resources)["lifecycle"] == {"preStop": {"sleep": {"seconds": 5}}}
+    assert pod_spec(resources)["terminationGracePeriodSeconds"] == 30
+
+
+def test_shutdown_delays_are_configurable():
+    resources = render(
+        "--set", f"publicUrl={PUBLIC_URL}",
+        "--set", "preStopSleepSeconds=15",
+        "--set", "terminationGracePeriodSeconds=60",
+    )
+    assert container(resources)["lifecycle"]["preStop"]["sleep"]["seconds"] == 15
+    assert pod_spec(resources)["terminationGracePeriodSeconds"] == 60
+
+
+def test_zero_sleep_renders_no_hook():
+    resources = render("--set", f"publicUrl={PUBLIC_URL}", "--set", "preStopSleepSeconds=0")
+    assert "lifecycle" not in container(resources)
+
+
+def test_shutdown_delays_from_a_values_file(tmp_path):
+    """-f gives floats, not the integers --set gives: 0 must still disable the hook."""
+    values = tmp_path / "values.yaml"
+    values.write_text(f"publicUrl: {PUBLIC_URL}\npreStopSleepSeconds: 0\nterminationGracePeriodSeconds: 1000000\n")
+    resources = render("-f", str(values))
+    assert "lifecycle" not in container(resources)
+    assert pod_spec(resources)["terminationGracePeriodSeconds"] == 1000000
+
+
+@pytest.mark.parametrize("grace", [5, 3], ids=["equal", "shorter"])
+def test_grace_period_must_outlast_the_sleep(grace):
+    result = helm_template(
+        "--set", f"publicUrl={PUBLIC_URL}",
+        "--set", "preStopSleepSeconds=5",
+        "--set", f"terminationGracePeriodSeconds={grace}",
+    )
+    assert result.returncode != 0
+    assert "must be larger than preStopSleepSeconds" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "value", ["preStopSleepSeconds=-1", "terminationGracePeriodSeconds=0"]
+)
+def test_out_of_range_shutdown_delays_are_rejected_by_the_schema(value):
+    result = helm_template("--set", f"publicUrl={PUBLIC_URL}", "--set", value)
+    assert result.returncode != 0
+    assert "values don't meet the specifications of the schema" in result.stderr
+
+
+@pytest.mark.parametrize("kube_version", ["1.30.0", "1.30.5-gke.1014000", "1.34.11+k3s1"])
+def test_chart_accepts_distribution_versions_from_1_30(kube_version):
+    """The -0 in kubeVersion is what admits GKE's pre-release-style versions."""
+    result = helm_template("--set", f"publicUrl={PUBLIC_URL}", "--kube-version", kube_version)
+    assert result.returncode == 0, result.stderr
+
+
+def test_chart_refuses_a_cluster_without_the_sleep_action():
+    result = helm_template("--set", f"publicUrl={PUBLIC_URL}", "--kube-version", "1.29.0")
+    assert result.returncode != 0
+    assert "kubeVersion" in result.stderr
+
+
 def test_packaged_chart_pins_the_image_of_its_own_version(tmp_path):
     """What the release does: package with the tag's version, which must reach the image."""
     packaged = subprocess.run(

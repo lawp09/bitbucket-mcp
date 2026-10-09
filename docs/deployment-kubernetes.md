@@ -52,6 +52,8 @@ refuses a `publicUrl` that is not `https://`, carries a path or ends with a slas
 | `multiTenant.readOnly` / `.allowDestructive` / `.issuerUrl` | off / off / empty | See the multi-tenant configuration reference |
 | `extraEnv` | `[]` | Any other variable (cache sizes, TTLs, page cap); derived variables are refused |
 | `ingress.enabled` / `.className` / `.annotations` / `.tls` | off | Standard Ingress over the **whole host** — `/.well-known/` must reach the server too |
+| `preStopSleepSeconds` | `5` | Seconds a terminating pod keeps serving before SIGTERM; `0` disables the hook |
+| `terminationGracePeriodSeconds` | `30` | Whole shutdown budget, sleep included; must be larger than the sleep |
 | `gke.backendConfig.enabled` | off | GKE only: health check on `/healthz`, backend timeout `timeoutSec` (120) |
 | `image.repository` / `image.tag` | `ghcr.io/lawp09/bitbucket-mcp` / the chart's `appVersion` | Pin another image — a fork publishes its own and must point here |
 
@@ -61,6 +63,15 @@ header, so kubelet and load-balancer probes pass the host allowlist.
 
 `replicaCount` can go above 1 — the server is stateless — but the token and client caches
 are per pod: each replica verifies a token on its own first request.
+
+During a rolling update, a terminating pod keeps serving for `preStopSleepSeconds` (5)
+before it gets SIGTERM, while the ingress controller and kube-proxy remove it from their
+endpoints. Without that delay, Traefik on k3s answered 502 to 2 calls out of 6 during a
+rollout. `0` disables the hook. `terminationGracePeriodSeconds` (30) is the whole shutdown
+budget, sleep included: the chart refuses a value that is not larger than the sleep. A
+cloud load balancer can take longer than an in-cluster proxy to drop an endpoint, so raise
+both values if a rollout still returns 5xx. The hook uses Kubernetes' native `sleep` action,
+so the image needs no `sleep` binary. This is why the chart requires Kubernetes 1.30 or later.
 
 ## Per cluster
 

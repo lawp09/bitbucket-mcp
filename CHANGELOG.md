@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Changed
+- The Helm chart now requires Kubernetes 1.30 or later, for the native preStop `sleep` action.
+
+### Fixed
+- Helm chart: a terminating pod keeps serving for `preStopSleepSeconds` (5, `0` disables it)
+  before SIGTERM, within `terminationGracePeriodSeconds` (30), so a rolling update stops
+  routing requests to a pod that has already exited (502). See docs/deployment-kubernetes.md.
+
 ## [1.29.0] - 2026-10-08
 
 ### Security

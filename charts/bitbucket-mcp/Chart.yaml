@@ -9,6 +9,8 @@ type: application
 # deploys the image's `latest` tag instead.
 version: 0.0.0-dev
 appVersion: latest
+# The Deployment's preStop hook uses the native sleep action (beta and on by default in 1.30).
+kubeVersion: ">=1.30.0-0"
 home: https://github.com/lawp09/bitbucket-mcp
 sources:
   - https://github.com/lawp09/bitbucket-mcp
