@@ -24,6 +24,8 @@
     },
     "extraEnv": {"type": "array"},
     "replicaCount": {"type": "integer", "minimum": 0},
+    "preStopSleepSeconds": {"type": "integer", "minimum": 0},
+    "terminationGracePeriodSeconds": {"type": "integer", "minimum": 0},
     "containerPort": {"type": "integer"}
   }
 }

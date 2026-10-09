@@ -186,6 +186,60 @@ def test_pod_runs_the_http_server_hardened():
     assert {"name": "tmp", "mountPath": "/tmp"} in c["volumeMounts"]
 
 
+def pod_spec(resources: dict) -> dict:
+    return resources["Deployment"]["spec"]["template"]["spec"]
+
+
+def test_pod_keeps_serving_while_it_leaves_the_endpoints():
+    """Without the sleep, a rolling update answers 502 until Traefik drops the old pod (#95)."""
+    resources = render("--set", f"publicUrl={PUBLIC_URL}")
+
+    # Native sleep action: the image needs no `sleep` binary and nothing is exec'd.
+    assert container(resources)["lifecycle"] == {"preStop": {"sleep": {"seconds": 5}}}
+    assert pod_spec(resources)["terminationGracePeriodSeconds"] == 30
+
+
+def test_shutdown_delays_are_configurable():
+    resources = render(
+        "--set", f"publicUrl={PUBLIC_URL}",
+        "--set", "preStopSleepSeconds=15",
+        "--set", "terminationGracePeriodSeconds=60",
+    )
+    assert container(resources)["lifecycle"]["preStop"]["sleep"]["seconds"] == 15
+    assert pod_spec(resources)["terminationGracePeriodSeconds"] == 60
+
+
+def test_zero_sleep_renders_no_hook():
+    resources = render(
+        "--set", f"publicUrl={PUBLIC_URL}",
+        "--set", "preStopSleepSeconds=0",
+        "--set", "terminationGracePeriodSeconds=0",
+    )
+    assert "lifecycle" not in container(resources)
+
+
+@pytest.mark.parametrize("grace", [5, 3], ids=["equal", "shorter"])
+def test_grace_period_must_outlast_the_sleep(grace):
+    result = helm_template(
+        "--set", f"publicUrl={PUBLIC_URL}",
+        "--set", "preStopSleepSeconds=5",
+        "--set", f"terminationGracePeriodSeconds={grace}",
+    )
+    assert result.returncode != 0
+    assert "terminationGracePeriodSeconds" in result.stderr
+
+
+@pytest.mark.parametrize("value", ["preStopSleepSeconds=-1", "terminationGracePeriodSeconds=-1"])
+def test_negative_shutdown_delays_are_rejected(value):
+    assert helm_template("--set", f"publicUrl={PUBLIC_URL}", "--set", value).returncode != 0
+
+
+def test_chart_refuses_a_cluster_without_the_sleep_action():
+    result = helm_template("--set", f"publicUrl={PUBLIC_URL}", "--kube-version", "1.29.0")
+    assert result.returncode != 0
+    assert "kubeVersion" in result.stderr
+
+
 def test_packaged_chart_pins_the_image_of_its_own_version(tmp_path):
     """What the release does: package with the tag's version, which must reach the image."""
     packaged = subprocess.run(

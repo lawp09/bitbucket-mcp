@@ -39,6 +39,14 @@ imagePullSecrets: []
 # -- Stateless: replicas are safe, but token and client caches are per pod.
 replicaCount: 1
 
+# -- Seconds a pod marked for deletion keeps serving before it gets SIGTERM, while the
+# ingress controller and kube-proxy drop it from their endpoints: without it, a rolling
+# update answers 502. 0 disables the hook.
+preStopSleepSeconds: 5
+
+# -- Whole shutdown budget, preStop sleep included. Must be larger than preStopSleepSeconds.
+terminationGracePeriodSeconds: 30
+
 containerPort: 8000
 
 service:

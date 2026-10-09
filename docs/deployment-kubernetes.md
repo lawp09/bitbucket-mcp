@@ -62,6 +62,15 @@ header, so kubelet and load-balancer probes pass the host allowlist.
 `replicaCount` can go above 1 — the server is stateless — but the token and client caches
 are per pod: each replica verifies a token on its own first request.
 
+During a rolling update, a terminating pod keeps serving for `preStopSleepSeconds` (5)
+before it gets SIGTERM, while the ingress controller and kube-proxy remove it from their
+endpoints. Without that delay, Traefik on k3s answered 502 to 2 calls out of 6 during a
+rollout. `0` disables the hook. `terminationGracePeriodSeconds` (30) is the whole shutdown
+budget, sleep included: the chart refuses a value that is not larger than the sleep. A
+cloud load balancer can take longer than an in-cluster proxy to drop an endpoint, so raise
+both values if a rollout still returns 5xx. The hook uses Kubernetes' native `sleep` action,
+so the image needs no `sleep` binary. This is why the chart requires Kubernetes 1.30 or later.
+
 ## Per cluster
 
 Ready-to-adapt values files live in [`charts/bitbucket-mcp/examples/`](../charts/bitbucket-mcp/examples/).
