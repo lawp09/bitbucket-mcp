@@ -52,6 +52,8 @@ refuses a `publicUrl` that is not `https://`, carries a path or ends with a slas
 | `multiTenant.readOnly` / `.allowDestructive` / `.issuerUrl` | off / off / empty | See the multi-tenant configuration reference |
 | `extraEnv` | `[]` | Any other variable (cache sizes, TTLs, page cap); derived variables are refused |
 | `ingress.enabled` / `.className` / `.annotations` / `.tls` | off | Standard Ingress over the **whole host** — `/.well-known/` must reach the server too |
+| `preStopSleepSeconds` | `5` | Seconds a terminating pod keeps serving before SIGTERM; `0` disables the hook |
+| `terminationGracePeriodSeconds` | `30` | Whole shutdown budget, sleep included; must be larger than the sleep |
 | `gke.backendConfig.enabled` | off | GKE only: health check on `/healthz`, backend timeout `timeoutSec` (120) |
 | `image.repository` / `image.tag` | `ghcr.io/lawp09/bitbucket-mcp` / the chart's `appVersion` | Pin another image — a fork publishes its own and must point here |
 

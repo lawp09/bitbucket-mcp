@@ -21,7 +21,7 @@ spec:
       {{- end }}
     spec:
       automountServiceAccountToken: false
-      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds | int }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -74,7 +74,7 @@ spec:
           lifecycle:
             preStop:
               sleep:
-                seconds: {{ . }}
+                seconds: {{ . | int }}
           {{- end }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
