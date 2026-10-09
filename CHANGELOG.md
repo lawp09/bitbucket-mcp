@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.29.1] - 2026-10-09
+
 ### Changed
 - The Helm chart now requires Kubernetes 1.30 or later, for the native preStop `sleep` action.
 
@@ -489,6 +491,8 @@
 ---
 
 ## [Unreleased]
+
+## [1.29.1] - 2026-10-09
 
 ### Added
 
