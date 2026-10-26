@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.29.2] - 2026-10-26
+
 ### Fixed
 - `get_pull_request` returns `source_commit` and `destination_commit` as full 40-character
   hashes (null when unresolvable), so a client can check that the PR head is the commit it
