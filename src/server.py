@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any, Tuple
 from urllib.parse import urlsplit
 from weakref import WeakKeyDictionary
+import httpx
 from mcp.server.auth.handlers.metadata import MetadataHandler
 from mcp.server.auth.routes import cors_middleware
 from mcp.server.auth.settings import AuthSettings
@@ -28,6 +29,7 @@ from .auth import (
     audit_logger,
     build_authorization_server_metadata,
     current_identity,
+    is_workspace_allowed,
     token_fingerprint,
 )
 from .client import (
@@ -975,17 +977,74 @@ async def get_pull_request(
           - total (int): Total number of comments
           - resolved (int): Number of resolved comments
           - unresolved (int): Number of unresolved comments
+        - source_commit / destination_commit (string or null): full 40-character
+          hash of the PR head and of the destination branch tip, unlike the
+          12-character hashes elsewhere. null when the commit cannot be resolved
+          (e.g. a deleted source branch, or a fork outside the allowed workspaces).
+          Only this tool returns them.
+        - participants[].state (string or null): "approved", "changes_requested"
+          or null — the participant's current review status
     """
     client = get_client()
     pr_data = await client.get_pull_request(repo_slug, pull_request_id, workspace)
     ws = workspace or client.workspace
 
-    comment_stats = await client.get_pull_request_comment_stats(
-        ws, repo_slug, pull_request_id
+    # return_exceptions: no lookup is left running against the client once the tool
+    # returns, even if the comment stats fail.
+    results = await asyncio.gather(
+        client.get_pull_request_comment_stats(ws, repo_slug, pull_request_id),
+        _resolve_pull_request_commit(client, pr_data, "source", repo_slug, ws),
+        _resolve_pull_request_commit(client, pr_data, "destination", repo_slug, ws),
+        return_exceptions=True,
     )
+    for outcome in results:
+        if isinstance(outcome, BaseException):
+            raise outcome
+    comment_stats, source_commit, destination_commit = results
     pr_data["comment_stats"] = comment_stats
 
-    return slim_pull_request(pr_data)
+    result = slim_pull_request(pr_data)
+    result["source_commit"] = source_commit
+    result["destination_commit"] = destination_commit
+    return result
+
+
+async def _resolve_pull_request_commit(
+    client: BitbucketClient,
+    pr_data: Dict[str, Any],
+    side: str,
+    repo_slug: str,
+    workspace: Optional[str],
+) -> Optional[str]:
+    """Full hash of a PR's ``source`` or ``destination`` commit, or ``None`` if unresolvable.
+
+    The commit is looked up in the repository that side belongs to: the source of a PR
+    from a fork lives in the fork. A failure degrades to ``None`` rather than failing
+    ``get_pull_request``, which worked before these fields existed.
+    """
+    endpoint = pr_data.get(side) or {}
+    short_hash = (endpoint.get("commit") or {}).get("hash")
+    if not short_hash:
+        return None
+    full_name = (endpoint.get("repository") or {}).get("full_name") or ""
+    owner, _, slug = full_name.partition("/")
+    if not owner or not slug or "/" in slug:
+        owner, slug = workspace, repo_slug
+    # A fork outside the allowlist is an expected null, not a refused request: checking
+    # first keeps it out of the security audit log.
+    if owner and not is_workspace_allowed(owner, client.allowed_workspaces):
+        logger.info(
+            "Not resolving %s commit %s: %s is outside the allowlist", side, short_hash, owner
+        )
+        return None
+    try:
+        return await client.resolve_commit_hash(slug, short_hash, owner)
+    except (httpx.HTTPError, AuthorizationError, ValueError) as exc:
+        logger.warning(
+            "Could not resolve %s commit %s of %s/%s: %s",
+            side, short_hash, owner or "<default>", slug, exc,
+        )
+        return None
 
 
 @conditional_tool()
@@ -1641,7 +1700,10 @@ async def get_pull_request_activity(
         max_pages: Maximum pages to fetch (default: 1, max recommended: 10)
 
     Returns:
-        Activity log with all events. Comment objects enriched with resolution status:
+        Activity log with all events. Each entry has a ``type``: update, comment,
+        approval, changes_requested (date + user) or unknown. The log is history:
+        a participant's current review status is ``participants[].state`` from
+        get_pull_request. Comment objects enriched with resolution status:
         - is_resolved (bool): True if comment is resolved
         - resolved_by (string or null): User display name who resolved the comment
         - resolved_on (string or null): Timestamp when comment was resolved

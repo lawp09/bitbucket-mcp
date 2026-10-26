@@ -36,6 +36,8 @@ _CONTENT_RANGE_RE = re.compile(
     r"^\s*bytes\s+(?:(\d+)-(\d+)|\*)/(\d+|\*)\s*$", re.IGNORECASE
 )
 
+_COMMIT_HASH = re.compile(r"[0-9a-f]{7,40}")
+
 # Mimetypes refused by get_file_content: returning their bytes as text would yield
 # mojibake and a huge useless payload. Kept deliberately narrow so source files
 # with unusual mimetypes (or a null mimetype) are still served.
@@ -3051,6 +3053,44 @@ class BitbucketClient:
         )
         response.raise_for_status()
         return response.json()
+
+    async def resolve_commit_hash(
+        self,
+        repo_slug: str,
+        commit_hash: str,
+        workspace: Optional[str] = None,
+    ) -> str:
+        """
+        Resolve an abbreviated commit hash to the full 40-character one.
+
+        Bitbucket returns 12-character hashes in pull request objects. A full hash is
+        returned as-is, without a request.
+
+        Args:
+            repo_slug: Repository slug
+            commit_hash: Hexadecimal commit hash, abbreviated or full
+            workspace: Workspace name (defaults to self.workspace)
+
+        Returns:
+            The full 40-character commit hash
+
+        Raises:
+            ValueError: ``commit_hash`` is not a hexadecimal hash, or the commit
+                Bitbucket returns does not extend it
+        """
+        if not _COMMIT_HASH.fullmatch(commit_hash):
+            raise ValueError(f"Not a commit hash: {commit_hash!r}")
+        if len(commit_hash) == 40:
+            return commit_hash
+        commit = await self.get_commit(repo_slug, commit_hash, workspace)
+        full_hash = commit.get("hash") or ""
+        # The endpoint also resolves branch and tag names: only a hash that extends the
+        # one asked for is the same commit.
+        if len(full_hash) != 40 or not full_hash.startswith(commit_hash):
+            raise ValueError(
+                f"Commit {commit_hash} resolved to an unrelated hash {full_hash!r}"
+            )
+        return full_hash
 
     async def get_commit_comments(
         self,
