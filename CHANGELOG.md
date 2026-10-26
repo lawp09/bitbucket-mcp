@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Fixed
+- `get_pull_request` returns `source_commit` and `destination_commit` as full 40-character
+  hashes (null when unresolvable), so a client can check that the PR head is the commit it
+  reviewed; it costs two extra API calls, run in parallel.
+- `get_pull_request` gives each participant its review `state` (`approved`,
+  `changes_requested` or null), and `get_pull_request_activity` returns requests for changes
+  as `changes_requested` entries instead of `unknown`, so a request for changes can be seen
+  and lifted.
+
 ## [1.29.1] - 2026-10-09
 
 ### Changed

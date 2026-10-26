@@ -135,6 +135,7 @@ def slim_pull_request(pr: Dict[str, Any]) -> Dict[str, Any]:
                 "uuid": p.get("user", {}).get("uuid"),
                 "role": p.get("role"),
                 "approved": p.get("approved"),
+                "state": p.get("state"),
             }
             for p in pr.get("participants", [])
         ],
@@ -378,11 +379,11 @@ def _slim_activity_update(update: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _slim_activity_approval(approval: Dict[str, Any]) -> Dict[str, Any]:
-    """Slim an activity approval entry."""
+def _slim_activity_review(review: Dict[str, Any]) -> Dict[str, Any]:
+    """Slim an activity approval or request-for-changes entry (same shape: date, user)."""
     return {
-        "date": approval.get("date"),
-        "user": _slim_user(approval.get("user")),
+        "date": review.get("date"),
+        "user": _slim_user(review.get("user")),
     }
 
 
@@ -398,7 +399,10 @@ def slim_activity_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
         result["comment"] = slim_comment(entry["comment"])
     elif "approval" in entry:
         result["type"] = "approval"
-        result["approval"] = _slim_activity_approval(entry["approval"])
+        result["approval"] = _slim_activity_review(entry["approval"])
+    elif "changes_requested" in entry:
+        result["type"] = "changes_requested"
+        result["changes_requested"] = _slim_activity_review(entry["changes_requested"])
     else:
         result["type"] = "unknown"
 

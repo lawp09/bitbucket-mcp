@@ -437,6 +437,30 @@ class TestSlimPullRequest:
         assert result["participants"][0]["approved"] is True
         assert "links" not in result["participants"][0]
 
+    def test_participant_review_state(self):
+        """participants[].state carries approval and request for changes (#98)."""
+        pr = {
+            **SAMPLE_PR,
+            "participants": [
+                {"user": SAMPLE_USER, "role": "REVIEWER", "approved": True, "state": "approved"},
+                {"user": SAMPLE_USER, "role": "PARTICIPANT", "approved": False,
+                 "state": "changes_requested"},
+                {"user": SAMPLE_USER, "role": "REVIEWER", "approved": False, "state": None},
+            ],
+        }
+        states = [p["state"] for p in slim_pull_request(pr)["participants"]]
+        assert states == ["approved", "changes_requested", None]
+
+    def test_participant_without_state_field(self):
+        result = slim_pull_request(SAMPLE_PR)
+        assert result["participants"][0]["state"] is None
+
+    def test_no_truncated_commit_hash(self):
+        """The raw 12-char hashes are not exposed: only get_pull_request resolves full ones."""
+        result = slim_pull_request(SAMPLE_PR)
+        assert "source_commit" not in result
+        assert "destination_commit" not in result
+
     def test_participant_missing_user_display_name(self):
         """Test participant where user has no display_name."""
         pr = {
@@ -766,6 +790,24 @@ class TestSlimActivity:
         result = slim_activity_entry(entry)
         assert result["type"] == "approval"
         assert result["approval"]["user"]["display_name"] == "Philippe LAWSON"
+        assert "pull_request" not in result
+
+    def test_changes_requested_activity(self):
+        """Live key is `changes_requested`, with a `pullrequest` (no underscore) payload."""
+        entry = {
+            "pull_request": {"type": "pullrequest", "id": 42, "links": SAMPLE_LINKS},
+            "changes_requested": {
+                "date": "2024-01-15T11:00:00+00:00",
+                "user": SAMPLE_USER,
+                "pullrequest": {"type": "pullrequest", "id": 42, "links": SAMPLE_LINKS},
+            },
+        }
+        result = slim_activity_entry(entry)
+        assert result["type"] == "changes_requested"
+        assert result["changes_requested"] == {
+            "date": "2024-01-15T11:00:00+00:00",
+            "user": {"display_name": "Philippe LAWSON", "nickname": "Phil", "username": "plawson"},
+        }
         assert "pull_request" not in result
 
     def test_unknown_activity_type(self):
